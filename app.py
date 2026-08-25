@@ -865,6 +865,30 @@ def get_master_signal(last):
         return "🟡 BEKLE / RİSKLİ", "linear-gradient(to right, #a16207, #f3c969)"
     return "🔵 TUT", "linear-gradient(to right, #0369a1, #65d9ff)"
 
+
+def get_signal_metrics(last):
+    """Converts technical agreement into a transparent decision-support score."""
+    trend = 1 if last["EMA_20"] > last["EMA_50"] else -1
+    momentum = 1 if last["MACD"] > last["MACD_Signal"] else -1
+    rsi = last["RSI"]
+    oscillator = 1 if 20 <= last["Stoch"] <= 80 else -1
+    price_band = 1 if last["BB_Low"] < last["Close"] < last["BB_High"] else -1
+    volume_ratio = last["Volume"] / last["Vol_SMA"] if last["Vol_SMA"] > 0 else 1
+    volume_confirmation = 1 if volume_ratio >= 1.3 and last["Close"] >= last["Open"] else 0
+    score = trend + momentum + oscillator + price_band + volume_confirmation
+    confidence = min(95, max(35, 50 + abs(score) * 9))
+    volatility = (last["ATR"] / last["Close"]) * 100 if last["Close"] else 0
+    risk = "YÜKSEK" if volatility >= 4 else "ORTA" if volatility >= 2 else "DÜŞÜK"
+    direction = "YUKARI" if score > 0 else "AŞAĞI" if score < 0 else "KARARSIZ"
+    return {
+        "score": score,
+        "confidence": confidence,
+        "direction": direction,
+        "risk": risk,
+        "volatility": volatility,
+        "volume_ratio": volume_ratio,
+    }
+
 def get_signal_summary(last):
     """Kararin nedenini tek satirlik, kullaniciya donuk bir ozet olarak uretir."""
     rsi = last['RSI']
@@ -1290,6 +1314,7 @@ def render_automation_view(selected_stocks):
         else:
             live_price, session_change, updated, live_last = float(last["Close"]), 0.0, "Güncel veri yok", last
         signal, signal_background = get_master_signal(live_last if quote else last)
+        metrics = get_signal_metrics(live_last if quote else last)
         prompt = f"""
 Türkçe ve çok kısa bir günlük finans otomasyonu özeti yaz.
 {name} ({symbol}) için yalnızca verilen veriyi kullan, yatırım tavsiyesi verme.
@@ -1298,6 +1323,7 @@ Günlük kapanış değişimi: %{daily_change:+.2f}
 Günlük değişim: %{session_change:+.2f}
 Son fiyat: {live_price:.2f} TL
 Sinyal motoru: {signal}
+Sinyal gücü: %{metrics['confidence']:.0f}, risk: {metrics['risk']}, oynaklık: %{metrics['volatility']:.2f}
 RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last['EMA_50']:.2f}
 """
         analysis = auto_ask_ai(
@@ -1309,6 +1335,7 @@ RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last
             f"<div class='trade-card'><div class='live-label'>{escape(name)} · SON KONTROL {escape(str(updated))}</div>"
             f"<div class='live-value'>{live_price:,.2f} TL <span style='font-size:12px;color:#aeb7c1'>{session_change:+.2f}% günlük</span></div>"
             f"<div class='trade-action' style='background:{signal_background};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent'>{escape(signal)}</div>"
+            f"<div class='levels-note'>Teyit gücü: <strong>%{metrics['confidence']:.0f}</strong> · Risk: <strong>{metrics['risk']}</strong> · Oynaklık: %{metrics['volatility']:.2f} · Hacim: {metrics['volume_ratio']:.1f}x</div>"
             f"<div class='levels-note'>{analysis}</div></div>", unsafe_allow_html=True,
         )
 
