@@ -406,6 +406,9 @@ st.markdown("""
     [data-testid="stSidebar"] > div:first-child {
         padding-top: 2.4rem;
     }
+    [data-testid="stSidebarContent"] {
+        animation: sidebar-content-enter 0.45s ease-out both;
+    }
     .sidebar-brand {
         animation: sidebar-enter 0.65s ease-out both;
         margin: 0 0 22px;
@@ -474,6 +477,10 @@ st.markdown("""
     }
     @keyframes sidebar-enter {
         from { opacity: 0; transform: translateX(-12px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes sidebar-content-enter {
+        from { opacity: 0; transform: translateX(-5px); }
         to { opacity: 1; transform: translateX(0); }
     }
     @keyframes live-pulse {
@@ -1159,11 +1166,13 @@ def fetch_analyst_overview(symbols):
             overview.append((symbol, "Güncel", {"AL": 0, "TUT": 0, "SAT": 0}))
     return overview
 
-@st.fragment(run_every="1s")
 def render_analyst_sidebar(symbols):
-    with st.sidebar.expander("👥 Analist görüşleri", expanded=True):
+    with st.sidebar.expander("👥 Analist görüşleri", expanded=False):
+        st.markdown('<div class="analyst-panel-note">İstersen yayınlanan analist oy dağılımını yükle.</div>', unsafe_allow_html=True)
+        if not st.button("Analist verisini yükle", key="load_analyst_data", use_container_width=True):
+            return
         remaining = 300 - (int(time.time()) % 300)
-        st.markdown(f'<div class="analyst-panel-note">Tek tek isim yerine yayınlanan analist oy dağılımı gösteriliyor.<br>Yeni analist verisi: {remaining} sn</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="analyst-panel-note">Yeni analist verisi: {remaining} sn</div>', unsafe_allow_html=True)
         for symbol, period, counts in fetch_analyst_overview(tuple(symbols)):
             total = sum(counts.values())
             st.markdown(f'<div class="analyst-group"><div class="analyst-symbol">{escape(symbol.replace(".IS", ""))} · {escape(period)}</div>', unsafe_allow_html=True)
@@ -1317,7 +1326,7 @@ with refresh_col:
         auto_ask_ai.clear()
         st.rerun()
 
-toolbar_col, index_col, status_col = st.columns([4, 2.4, 3.6], gap="large")
+toolbar_col, index_col, range_col, status_col = st.columns([3.5, 2.2, 1.8, 2.5], gap="large")
 with toolbar_col:
     st.markdown('<div class="topbar-label">TAKİP LİSTESİ</div>', unsafe_allow_html=True)
     selected_bist30 = st.multiselect(
@@ -1335,6 +1344,9 @@ with toolbar_col:
 with index_col:
     st.markdown('<div class="topbar-label">ENDEKSLER</div>', unsafe_allow_html=True)
     selected_index = st.selectbox("BIST100", list(BIST100_MARKETS), label_visibility="collapsed")
+with range_col:
+    st.markdown('<div class="topbar-label">GRAFİK</div>', unsafe_allow_html=True)
+    chart_window = st.selectbox("Grafik aralığı", ["1A", "3A", "6A", "1Y", "5Y"], index=3, label_visibility="collapsed")
 with status_col:
     st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
     st.markdown(render_market_status(), unsafe_allow_html=True)
@@ -1415,7 +1427,14 @@ elif st.session_state.active_view == "market":
             with col_chart:
                 up_color = '#35d08a'
                 down_color = '#e05260'
-                chart_range = [df.index[-1] - pd.DateOffset(years=1), df.index[-1]]
+                chart_offsets = {
+                    "1A": pd.DateOffset(months=1),
+                    "3A": pd.DateOffset(months=3),
+                    "6A": pd.DateOffset(months=6),
+                    "1Y": pd.DateOffset(years=1),
+                    "5Y": pd.DateOffset(years=5),
+                }
+                chart_range = [df.index[-1] - chart_offsets[chart_window], df.index[-1]]
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df.index,
@@ -1458,7 +1477,7 @@ elif st.session_state.active_view == "market":
                     paper_bgcolor='#0d1716',
                     plot_bgcolor='#14241f',
                     margin=dict(l=8, r=12, t=12, b=58),
-                    height=285,
+                    height=350,
                     showlegend=False,
                     dragmode='pan',
                     uirevision='borsam-price-chart',
