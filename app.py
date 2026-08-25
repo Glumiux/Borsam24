@@ -29,12 +29,44 @@ st.markdown("""
 <style>
     .stApp {
         background:
-            radial-gradient(circle at 12% 8%, rgba(119, 132, 148, 0.16), transparent 30%),
-            radial-gradient(circle at 92% 16%, rgba(74, 101, 111, 0.12), transparent 28%),
-            #101a1a;
+            linear-gradient(180deg, #0b1718 0%, #101d1e 44%, #0b1517 100%);
         color: #e7eaee;
     }
+    [data-testid="stAppViewContainer"] {
+        background-image: linear-gradient(rgba(119, 198, 176, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(119, 198, 176, 0.035) 1px, transparent 1px);
+        background-size: 42px 42px;
+    }
+    [data-testid="stMainBlockContainer"] { max-width: 1500px; padding-top: 1.2rem; }
     h1, h2, h3 { color: #ffffff !important; }
+    .hero-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        margin: 0 0 18px;
+        padding: 18px 22px;
+        border: 1px solid rgba(122, 213, 188, 0.18);
+        border-radius: 16px;
+        background: linear-gradient(110deg, rgba(27, 58, 55, 0.82), rgba(24, 37, 44, 0.78));
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255,255,255,0.045);
+        animation: card-enter 0.5s ease both;
+    }
+    .hero-eyebrow { color: #67dfb3; font-size: 10px; font-weight: 900; letter-spacing: 0.16em; }
+    .hero-title { margin-top: 4px; color: #f4fbf8; font-size: 24px; font-weight: 900; letter-spacing: 0; }
+    .hero-subtitle { margin-top: 5px; color: #9bb2b0; font-size: 11px; }
+    .hero-mark {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 48px;
+        height: 48px;
+        border: 1px solid rgba(103, 223, 179, 0.32);
+        border-radius: 14px;
+        background: rgba(103, 223, 179, 0.11);
+        color: #67dfb3;
+        font-size: 22px;
+        box-shadow: 0 0 24px rgba(103, 223, 179, 0.12);
+    }
     .topbar {
         display: flex;
         align-items: center;
@@ -54,6 +86,15 @@ st.markdown("""
         letter-spacing: 0.08em;
         white-space: nowrap;
     }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"],
+    [data-baseweb="tag"] {
+        border: 1px solid rgba(103, 223, 179, 0.28) !important;
+        border-radius: 999px !important;
+        background: rgba(44, 124, 100, 0.78) !important;
+        color: #effff8 !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] svg,
+    [data-baseweb="tag"] svg { fill: #b8f4dc !important; }
     .news-section-title {
         display: flex;
         align-items: center;
@@ -322,7 +363,7 @@ st.markdown("""
         border: 1px solid rgba(180, 190, 201, 0.16);
         border-radius: 12px;
         overflow: hidden;
-        background: rgba(38, 43, 50, 0.78);
+        background: linear-gradient(100deg, rgba(25, 45, 47, 0.9), rgba(28, 37, 44, 0.84));
         box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
         backdrop-filter: blur(18px);
     }
@@ -502,6 +543,8 @@ st.markdown("""
         box-shadow: 0 12px 32px rgba(0, 0, 0, 0.20);
         overflow: hidden;
     }
+    [data-testid="stPlotlyChart"] > div { border-radius: 12px; }
+    div[data-testid="stVerticalBlock"] > div:has(> div > .hero-bar) { gap: 0.35rem; }
 
     .ai-card {
         background: rgba(51, 57, 66, 0.62);
@@ -1243,9 +1286,15 @@ RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last
 if "active_view" not in st.session_state:
     st.session_state.active_view = "market"
 
-title_col, market_col, news_col, automation_col, refresh_col = st.columns([3.1, 1.4, 1.4, 1.7, 2.4], gap="small")
-with title_col:
-    st.markdown('<div class="trading-title">⚡ Hızlı & Akıllı Terminal</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="hero-bar"><div><div class="hero-eyebrow">BORSAM24 · PİYASA TERMİNALİ</div>'
+    '<div class="hero-title">Hızlı ve akıllı takip</div>'
+    '<div class="hero-subtitle">Canlı fiyatlar, sade sinyaller ve karar desteği tek ekranda.</div></div>'
+    '<div class="hero-mark">↗</div></div>',
+    unsafe_allow_html=True,
+)
+
+market_col, news_col, automation_col, refresh_col = st.columns([1.5, 1.5, 1.8, 2.3], gap="small")
 with market_col:
     if st.button("▦ PİYASA", use_container_width=True, help="Piyasa analizini göster"):
         st.session_state.active_view = "market"
