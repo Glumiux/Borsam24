@@ -1487,18 +1487,7 @@ elif st.session_state.active_view == "market":
                     xaxis=dict(
                         type='date', range=chart_range, fixedrange=False, showline=False,
                         showgrid=True, gridcolor='rgba(112, 157, 132, 0.13)',
-                        rangeselector=dict(
-                            buttons=[
-                                dict(count=1, label='1G', step='day', stepmode='backward'),
-                                dict(count=7, label='1H', step='day', stepmode='backward'),
-                                dict(count=1, label='1A', step='month', stepmode='backward'),
-                                dict(count=1, label='1Y', step='year', stepmode='backward'),
-                                dict(step='all', label='Tümü'),
-                            ],
-                            x=0, y=-0.18, xanchor='left', yanchor='top',
-                            bgcolor='#253a31', activecolor='#35d08a',
-                            font=dict(color='#f4f6f8', size=11),
-                        ),
+                        rangeslider=dict(visible=False),
                     ),
                     yaxis=dict(side='right', fixedrange=False, showgrid=True,
                                gridcolor='rgba(112, 157, 132, 0.16)', zeroline=False,
