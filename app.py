@@ -14,6 +14,7 @@ import time
 import os
 import requests
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
 try:
     from anthropic import Anthropic
@@ -810,7 +811,12 @@ def fetch_live_quote(symbol: str):
         daily_closes = daily_df["Close"].dropna()
         previous_close = float(daily_closes.iloc[-2]) if len(daily_closes) >= 2 else current
         daily_change = ((current - previous_close) / previous_close) * 100 if previous_close else 0
-        return current, daily_change, df.index[-1].strftime("%d.%m %H:%M"), df.iloc[-1]
+        source_timestamp = pd.Timestamp(df.index[-1])
+        if source_timestamp.tzinfo is None:
+            source_timestamp = source_timestamp.tz_localize("UTC")
+        source_timestamp = source_timestamp.tz_convert(ZoneInfo("Europe/Istanbul"))
+        age_seconds = max(0, int((pd.Timestamp.now(tz="Europe/Istanbul") - source_timestamp).total_seconds()))
+        return current, daily_change, source_timestamp.strftime("%d.%m %H:%M"), df.iloc[-1], age_seconds
     except Exception:
         return None
 
@@ -822,10 +828,13 @@ def render_live_strip(symbol: str, fallback_price: float, fallback_change: float
     live_price, live_change, live_updated = quote[:3] if quote else (
         fallback_price, fallback_change, fallback_time
     )
+    age_seconds = quote[4] if quote else None
+    freshness = f"veri {age_seconds} sn önce" if age_seconds is not None else "veri zamanı bilinmiyor"
+    freshness_color = "#ff7c8e" if age_seconds is not None and age_seconds > 180 else "#aeb7c1"
     st.markdown(
         f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
         f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
-        f"<div class='live-time'>{live_change:+.2f}% günlük<br>{escape(str(live_updated))}</div></div>",
+        f"<div class='live-time'>{live_change:+.2f}% günlük<br>{escape(str(live_updated))}<br><span style='color:{freshness_color}'>{freshness}</span></div></div>",
         unsafe_allow_html=True,
     )
 
@@ -1310,9 +1319,9 @@ def render_automation_view(selected_stocks):
         previous = df.iloc[-2]
         daily_change = ((last["Close"] - previous["Close"]) / previous["Close"]) * 100
         if quote:
-            live_price, session_change, updated, live_last = quote
+            live_price, session_change, updated, live_last, age_seconds = quote
         else:
-            live_price, session_change, updated, live_last = float(last["Close"]), 0.0, "Güncel veri yok", last
+            live_price, session_change, updated, live_last, age_seconds = float(last["Close"]), 0.0, "Güncel veri yok", last, None
         signal, signal_background = get_master_signal(live_last if quote else last)
         metrics = get_signal_metrics(live_last if quote else last)
         prompt = f"""
@@ -1331,11 +1340,13 @@ RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last
             float(live_last["Volume"]), float(live_last["Vol_SMA"]),
             float(daily_change), prompt,
         )
+        freshness = f"veri {age_seconds} sn önce" if age_seconds is not None else "veri zamanı bilinmiyor"
+        freshness_color = "#ff7c8e" if age_seconds is not None and age_seconds > 180 else "#aeb7c1"
         st.markdown(
-            f"<div class='trade-card'><div class='live-label'>{escape(name)} · SON KONTROL {escape(str(updated))}</div>"
+            f"<div class='trade-card'><div class='live-label'>{escape(name)} · VERİ {escape(str(updated))}</div>"
             f"<div class='live-value'>{live_price:,.2f} TL <span style='font-size:12px;color:#aeb7c1'>{session_change:+.2f}% günlük</span></div>"
             f"<div class='trade-action' style='background:{signal_background};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent'>{escape(signal)}</div>"
-            f"<div class='levels-note'>Teyit gücü: <strong>%{metrics['confidence']:.0f}</strong> · Risk: <strong>{metrics['risk']}</strong> · Oynaklık: %{metrics['volatility']:.2f} · Hacim: {metrics['volume_ratio']:.1f}x</div>"
+            f"<div class='levels-note'>Teyit gücü: <strong>%{metrics['confidence']:.0f}</strong> · Risk: <strong>{metrics['risk']}</strong> · Oynaklık: %{metrics['volatility']:.2f} · Hacim: {metrics['volume_ratio']:.1f}x<br><span style='color:{freshness_color}'>{freshness}</span></div>"
             f"<div class='levels-note'>{analysis}</div></div>", unsafe_allow_html=True,
         )
 
@@ -1430,8 +1441,8 @@ elif st.session_state.active_view == "market":
             pct_change = ((last['Close'] - prev['Close']) / prev['Close']) * 100
             support, resistance = get_support_resistance(df)
             live_quote = fetch_live_quote(symbol)
-            live_price, live_change, live_updated, indicator_last = live_quote or (
-                float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last
+            live_price, live_change, live_updated, indicator_last, live_age = live_quote or (
+                float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last, None
             )
             prompt_data = f"""
             Sen temkinli bir finans analistisin. {name} ({symbol}) için güncel teknik veriyi Türkçe ve kısa yorumla.
