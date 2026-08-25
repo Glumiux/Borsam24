@@ -953,7 +953,7 @@ def auto_ask_ai(name, symbol, close, rsi, volume, volume_average, pct_change, pr
             response = Anthropic(api_key=CLAUDE_API_KEY).messages.create(
                 model="claude-3-5-haiku-latest",
                 max_tokens=500,
-                system="Türkçe konuşan, temkinli bir finans analiz asistanısın. Veri uydurma ve yatırım tavsiyesi verme.",
+                system="Türkçe konuşan, temkinli bir finans analiz asistanısın. Veri uydurma ve yatırım tavsiyesi verme. Günlük değişimi yalnızca promptta 'Günlük kapanış değişimi' olarak verilen yüzdeyle yorumla; 'Seans içi 1 dakikalık değişim'i günlük değişim olarak adlandırma.",
                 messages=[{"role": "user", "content": prompt}],
             )
             text = "".join(block.text for block in response.content if hasattr(block, "text"))
@@ -1408,7 +1408,9 @@ elif st.session_state.active_view == "market":
             Sen temkinli bir finans analistisin. {name} ({symbol}) için güncel teknik veriyi Türkçe ve kısa yorumla.
             Yatırım tavsiyesi verme; veri eksikse bunu söyle, rakam uydurma.
             En fazla 4 kısa madde kullan: Yön, Momentum, Risk, İzlenecek seviye.
-            1 dakikalık son fiyat: {live_price:.2f} TL, değişim: %{live_change:+.2f}
+            1 dakikalık son fiyat: {live_price:.2f} TL
+            Seans içi 1 dakikalık değişim: %{live_change:+.2f}
+            Günlük kapanış değişimi: %{pct_change:+.2f}
             1 dakikalık teknik veri: RSI: {indicator_last['RSI']:.1f}, EMA20: {indicator_last['EMA_20']:.2f}, EMA50: {indicator_last['EMA_50']:.2f}
             Destek: {support:.2f}, direnç: {resistance:.2f}
 
