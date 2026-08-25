@@ -698,32 +698,6 @@ def fetch_stock_data(symbol: str, timeframe: str = "1Y"):
     df['Vol_SMA'] = df['Volume'].rolling(20).mean()
     return df
 
-@st.cache_data(ttl=20)
-def fetch_day_trading_data(symbol: str):
-    """1 dakikalik veriden gun ici sinyal icin gerekli gostergeleri uretir."""
-    df = yf.download(
-        symbol,
-        period="1d",
-        interval="1m",
-        progress=False,
-        auto_adjust=False,
-        prepost=False,
-    )
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    required = {"Open", "High", "Low", "Close", "Volume"}
-    if df.empty or not required.issubset(df.columns):
-        return pd.DataFrame()
-    df = df[["Open", "High", "Low", "Close", "Volume"]].ffill().dropna()
-    df["EMA_9"] = EMAIndicator(close=df["Close"], window=9).ema_indicator()
-    df["EMA_21"] = EMAIndicator(close=df["Close"], window=21).ema_indicator()
-    df["RSI"] = RSIIndicator(close=df["Close"], window=14).rsi()
-    typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
-    session_key = pd.Series(df.index.date, index=df.index)
-    df["VWAP"] = (typical_price * df["Volume"]).groupby(session_key).cumsum() / df["Volume"].groupby(session_key).cumsum()
-    df["ATR"] = AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
-    return df.dropna()
-
 @st.cache_data(ttl=15)
 def fetch_live_quote(symbol: str):
     """Kisa vadeli fiyat karti icin 1 dakikalik son fiyati getirir."""
@@ -775,36 +749,6 @@ def render_live_strip(symbol: str, fallback_price: float, fallback_change: float
         f"<div class='live-time'>{live_change:+.2f}%<br>{escape(str(live_updated))}</div></div>",
         unsafe_allow_html=True,
     )
-
-def get_day_trading_signal(df):
-    if df.empty:
-        return {"action": "VERİ YOK", "class": "indicator-neutral", "price": None, "entry": None, "stop": None, "target": None, "note": "1 dakikalık veri alınamadı."}
-    last = df.iloc[-1]
-    bullish = last["EMA_9"] > last["EMA_21"] and last["Close"] > last["VWAP"] and 52 <= last["RSI"] <= 70
-    bearish = last["EMA_9"] < last["EMA_21"] and last["Close"] < last["VWAP"] and 30 <= last["RSI"] <= 48
-    if bullish:
-        action, css_class, note = "AL", "indicator-positive", "EMA 9, VWAP ve RSI birlikte yukarı yönü destekliyor."
-        stop = last["Close"] - (last["ATR"] * 1.2)
-        target = last["Close"] + (last["ATR"] * 1.8)
-    elif bearish:
-        action, css_class, note = "SAT", "indicator-negative", "EMA 9, VWAP ve RSI birlikte aşağı yönü destekliyor."
-        stop = last["Close"] + (last["ATR"] * 1.2)
-        target = last["Close"] - (last["ATR"] * 1.8)
-    else:
-        action, css_class, note = "BEKLE", "indicator-neutral", "Koşullar aynı yönde yeterince kesişmedi; teyit bekleniyor."
-        stop = target = None
-    return {
-        "action": action,
-        "class": css_class,
-        "price": float(last["Close"]),
-        "entry": float(last["Close"]),
-        "stop": float(stop) if stop is not None else None,
-        "target": float(target) if target is not None else None,
-        "rsi": float(last["RSI"]),
-        "vwap": float(last["VWAP"]),
-        "updated": df.index[-1].strftime("%d.%m %H:%M"),
-        "note": note,
-    }
 
 def get_support_resistance(df):
     recent = df.tail(60)
@@ -1350,15 +1294,12 @@ RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last
 if "active_view" not in st.session_state:
     st.session_state.active_view = "market"
 
-title_col, market_col, trading_col, news_col, automation_col, refresh_col = st.columns([2.7, 1.3, 1.3, 1.3, 1.6, 2.2], gap="small")
+title_col, market_col, news_col, automation_col, refresh_col = st.columns([3.1, 1.4, 1.4, 1.7, 2.4], gap="small")
 with title_col:
     st.markdown('<div class="trading-title">⚡ Hızlı & Akıllı Terminal</div>', unsafe_allow_html=True)
 with market_col:
     if st.button("▦ PİYASA", use_container_width=True, help="Piyasa analizini göster"):
         st.session_state.active_view = "market"
-with trading_col:
-    if st.button("⌁ TRADING", type="secondary", use_container_width=True, help="Day trading görünümünü aç"):
-        st.session_state.active_view = "trading"
 with news_col:
     if st.button("◌ HABERLER", type="secondary", use_container_width=True, help="Türkçe haber özetlerini aç"):
         st.session_state.active_view = "news"
@@ -1368,7 +1309,6 @@ with automation_col:
 with refresh_col:
     if st.button("VERİLERİ YENİLE", icon=":material/refresh:", use_container_width=True, help="Grafik, indikatör ve piyasa verilerini güncelle"):
         fetch_stock_data.clear()
-        fetch_day_trading_data.clear()
         fetch_live_quote.clear()
         fetch_market_snapshot.clear()
         fetch_followed_news.clear()
@@ -1418,25 +1358,6 @@ if st.session_state.active_view == "news":
 
 if st.session_state.active_view == "automation":
     render_automation_view(selected_stocks)
-
-if st.session_state.active_view == "trading" and selected_stocks:
-    st.markdown('<div class="trade-card"><div class="fundamental-header">Day trading sinyalleri</div><div class="levels-note">1 dakikalık veri · sinyal garanti değildir; risk yönetimi ve emir kararını kullanıcı verir.</div></div>', unsafe_allow_html=True)
-    trade_cols = st.columns(min(len(selected_stocks), 3))
-    for index, name in enumerate(selected_stocks):
-        trade_df = fetch_day_trading_data(STOCK_UNIVERSE[name])
-        trade = get_day_trading_signal(trade_df)
-        with trade_cols[index % len(trade_cols)]:
-            if trade["price"] is None:
-                st.warning(f"{name}: {trade['note']}")
-            else:
-                stop = f"{trade['stop']:,.2f}" if trade['stop'] is not None else "-"
-                target = f"{trade['target']:,.2f}" if trade['target'] is not None else "-"
-                st.markdown(
-                    f"<div class='trade-card'><div>{escape(name)} · {trade['updated']}</div>"
-                    f"<div class='trade-action {trade['class']}'>{trade['action']}</div>"
-                    f"<div class='levels-note'>Fiyat {trade['price']:,.2f} · RSI {trade['rsi']:.1f} · VWAP {trade['vwap']:,.2f}<br>Stop: {stop} · Hedef: {target}<br>{escape(trade['note'])}</div></div>",
-                    unsafe_allow_html=True,
-                )
 
 if st.session_state.active_view == "market":
     render_market_ticker()
