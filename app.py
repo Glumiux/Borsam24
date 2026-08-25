@@ -1297,13 +1297,60 @@ def render_market_status():
     color = "#35d0a0" if is_open else "#f3c969"
     return f"<div class='market-status' style='color:{color};'><span class='market-status-dot' style='background:{color};box-shadow:0 0 9px {color};'></span>{label} · BIST seansı</div>"
 
+
+@st.fragment(run_every="60s")
+def render_automation_view(selected_stocks):
+    """Shows a compact recurring review while the automation tab is open."""
+    st.markdown('<div class="section-kicker">Finans otomasyonu</div>', unsafe_allow_html=True)
+    st.markdown("### Günlük karar destek merkezi")
+    st.caption("Takip listesindeki hisseler her 60 saniyede yeniden kontrol edilir. Bu ekran emir göndermez.")
+    if not selected_stocks:
+        st.markdown("<div class='portfolio-empty'>Önce takip listene hisse ekle; otomasyon burada canlı özet ve risk uyarısı oluşturacak.</div>", unsafe_allow_html=True)
+        return
+    for name in selected_stocks:
+        symbol = STOCK_UNIVERSE[name]
+        quote = fetch_live_quote(symbol)
+        df = fetch_stock_data(symbol, "1Y")
+        if df.empty:
+            st.warning(f"{name}: teknik veri alınamadı.")
+            continue
+        last = df.iloc[-1]
+        previous = df.iloc[-2]
+        daily_change = ((last["Close"] - previous["Close"]) / previous["Close"]) * 100
+        if quote:
+            live_price, session_change, updated, live_last = quote
+        else:
+            live_price, session_change, updated, live_last = float(last["Close"]), 0.0, "Güncel veri yok", last
+        signal, signal_background = get_master_signal(live_last if quote else last)
+        prompt = f"""
+Türkçe ve çok kısa bir günlük finans otomasyonu özeti yaz.
+{name} ({symbol}) için yalnızca verilen veriyi kullan, yatırım tavsiyesi verme.
+3 kısa madde üret: Durum, Risk, İzlenecek.
+Günlük kapanış değişimi: %{daily_change:+.2f}
+Seans içi değişim: %{session_change:+.2f}
+Son fiyat: {live_price:.2f} TL
+Sinyal motoru: {signal}
+RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last['EMA_50']:.2f}
+"""
+        analysis = auto_ask_ai(
+            name, symbol, float(live_price), float(live_last["RSI"]),
+            float(live_last["Volume"]), float(live_last["Vol_SMA"]),
+            float(daily_change), prompt,
+        )
+        st.markdown(
+            f"<div class='trade-card'><div class='live-label'>{escape(name)} · SON KONTROL {escape(str(updated))}</div>"
+            f"<div class='live-value'>{live_price:,.2f} TL <span style='font-size:12px;color:#aeb7c1'>{session_change:+.2f}% seans</span></div>"
+            f"<div class='trade-action' style='background:{signal_background};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent'>{escape(signal)}</div>"
+            f"<div class='levels-note'>{analysis}</div></div>", unsafe_allow_html=True,
+        )
+
 # ==========================================
 # 4. ANA EKRAN (GRAFİK + CANLI KARTLAR)
 # ==========================================
 if "active_view" not in st.session_state:
     st.session_state.active_view = "market"
 
-title_col, market_col, trading_col, news_col, refresh_col = st.columns([3, 1.5, 1.5, 1.5, 2.5], gap="small")
+title_col, market_col, trading_col, news_col, automation_col, refresh_col = st.columns([2.7, 1.3, 1.3, 1.3, 1.6, 2.2], gap="small")
 with title_col:
     st.markdown('<div class="trading-title">⚡ Hızlı & Akıllı Terminal</div>', unsafe_allow_html=True)
 with market_col:
@@ -1315,6 +1362,9 @@ with trading_col:
 with news_col:
     if st.button("◌ HABERLER", type="secondary", use_container_width=True, help="Türkçe haber özetlerini aç"):
         st.session_state.active_view = "news"
+with automation_col:
+    if st.button("◎ OTOMASYON", type="secondary", use_container_width=True, help="Tekrarlayan finans analizini aç"):
+        st.session_state.active_view = "automation"
 with refresh_col:
     if st.button("VERİLERİ YENİLE", icon=":material/refresh:", use_container_width=True, help="Grafik, indikatör ve piyasa verilerini güncelle"):
         fetch_stock_data.clear()
@@ -1365,6 +1415,9 @@ st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=Tru
 
 if st.session_state.active_view == "news":
     render_sidebar_news(selected_symbols)
+
+if st.session_state.active_view == "automation":
+    render_automation_view(selected_stocks)
 
 if st.session_state.active_view == "trading" and selected_stocks:
     st.markdown('<div class="trade-card"><div class="fundamental-header">Day trading sinyalleri</div><div class="levels-note">1 dakikalık veri · sinyal garanti değildir; risk yönetimi ve emir kararını kullanıcı verir.</div></div>', unsafe_allow_html=True)
