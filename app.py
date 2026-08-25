@@ -37,8 +37,8 @@ st.markdown("""
         background-size: 42px 42px;
     }
     header[data-testid="stHeader"] {
-        height: 2rem !important;
-        min-height: 2rem !important;
+        height: 1.5rem !important;
+        min-height: 1.5rem !important;
         padding: 0 !important;
         background: rgba(10, 18, 20, 0.92);
         border-bottom: 1px solid rgba(103, 223, 179, 0.1);
@@ -52,6 +52,7 @@ st.markdown("""
     header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] {
         display: flex !important;
         visibility: visible !important;
+        opacity: 1 !important;
         position: absolute !important;
         left: 0.45rem !important;
         top: 0.15rem !important;
@@ -59,11 +60,12 @@ st.markdown("""
     }
     header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"] button,
     header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] button {
-        min-height: 1.6rem !important;
+        min-height: 1.25rem !important;
         width: 2rem !important;
         padding: 0 !important;
+        color: #a7bdc1 !important;
     }
-    [data-testid="stMainBlockContainer"] { max-width: 1500px; padding-top: 0.45rem; }
+    [data-testid="stMainBlockContainer"] { max-width: 1500px; padding-top: 0.2rem; }
     h1, h2, h3 { color: #ffffff !important; }
     .hero-bar {
         display: flex;
