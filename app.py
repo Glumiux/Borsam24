@@ -867,18 +867,12 @@ def fetch_live_quote(symbol: str):
         if len(df) < 2:
             return None
         current = float(df["Close"].iloc[-1])
-        daily_df = yf.download(symbol, period="5d", interval="1d", progress=False, auto_adjust=False)
-        if isinstance(daily_df.columns, pd.MultiIndex):
-            daily_df.columns = daily_df.columns.get_level_values(0)
-        daily_closes = daily_df["Close"].dropna()
-        previous_close = float(daily_closes.iloc[-2]) if len(daily_closes) >= 2 else current
-        daily_change = ((current - previous_close) / previous_close) * 100 if previous_close else 0
         source_timestamp = pd.Timestamp(df.index[-1])
         if source_timestamp.tzinfo is None:
             source_timestamp = source_timestamp.tz_localize("UTC")
         source_timestamp = source_timestamp.tz_convert(ZoneInfo("Europe/Istanbul"))
         age_seconds = max(0, int((pd.Timestamp.now(tz="Europe/Istanbul") - source_timestamp).total_seconds()))
-        return current, daily_change, source_timestamp.strftime("%d.%m %H:%M"), df.iloc[-1], age_seconds
+        return current, source_timestamp.strftime("%d.%m %H:%M"), df.iloc[-1], age_seconds
     except Exception:
         return None
 
@@ -887,10 +881,11 @@ def fetch_live_quote(symbol: str):
 def render_live_strip(symbol: str, fallback_price: float, fallback_change: float, fallback_time: str):
     """Refreshes the visible quote independently from the expensive page render."""
     quote = fetch_live_quote(symbol)
-    live_price, live_change, live_updated = quote[:3] if quote else (
-        fallback_price, fallback_change, fallback_time
-    )
-    age_seconds = quote[4] if quote else None
+    if quote:
+        live_price, live_updated, _, age_seconds = quote
+        live_change = fallback_change
+    else:
+        live_price, live_change, live_updated, age_seconds = fallback_price, fallback_change, fallback_time, None
     freshness = f"veri {age_seconds} sn önce" if age_seconds is not None else "veri zamanı bilinmiyor"
     freshness_color = "#ff7c8e" if age_seconds is not None and age_seconds > 180 else "#aeb7c1"
     live_label = "CANLI BAR · 1 DK" if age_seconds is None or age_seconds <= 180 else "GECİKMELİ VERİ"
@@ -1409,9 +1404,10 @@ def render_automation_view(selected_stocks):
         previous = df.iloc[-2]
         daily_change = ((last["Close"] - previous["Close"]) / previous["Close"]) * 100
         if quote:
-            live_price, session_change, updated, live_last, age_seconds = quote
+            live_price, updated, live_last, age_seconds = quote
+            session_change = daily_change
         else:
-            live_price, session_change, updated, live_last, age_seconds = float(last["Close"]), 0.0, "Güncel veri yok", last, None
+            live_price, session_change, updated, live_last, age_seconds = float(last["Close"]), daily_change, "Güncel veri yok", last, None
         if age_seconds is not None and age_seconds > 180:
             st.warning(f"{name}: veri {age_seconds} saniyedir güncellenmedi; analiz üretilmedi.")
             continue
@@ -1538,9 +1534,13 @@ elif st.session_state.active_view == "market":
             pct_change = ((last['Close'] - prev['Close']) / prev['Close']) * 100
             support, resistance = get_support_resistance(df)
             live_quote = fetch_live_quote(symbol)
-            live_price, live_change, live_updated, indicator_last, live_age = live_quote or (
-                float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last, None
-            )
+            if live_quote:
+                live_price, live_updated, indicator_last, live_age = live_quote
+                live_change = pct_change
+            else:
+                live_price, live_change, live_updated, indicator_last, live_age = (
+                    float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last, None
+                )
             prompt_data = f"""
             Sen temkinli bir finans analistisin. {name} ({symbol}) için güncel teknik veriyi Türkçe ve kısa yorumla.
             Yatırım tavsiyesi verme; veri eksikse bunu söyle, rakam uydurma.
