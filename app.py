@@ -88,6 +88,38 @@ st.markdown("""
     .news-title { margin-top: 8px; color: #e7eaee; font-size: 12px; font-weight: 700; line-height: 1.4; }
     .news-time { margin-top: 7px; color: #87919d; font-size: 9px; }
     .news-summary { margin-top: 8px; color: #b8c2cd; font-size: 11px; line-height: 1.5; }
+    .watchlist-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 8px 0 16px;
+        animation: card-enter 0.35s ease both;
+    }
+    .watch-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 8px 5px 5px;
+        border: 1px solid rgba(180, 190, 201, 0.16);
+        border-radius: 999px;
+        background: rgba(43, 48, 56, 0.64);
+        color: #dce4eb;
+        font-size: 10px;
+        font-weight: 800;
+    }
+    .watch-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #35d0a0, #2384a8);
+        color: #071714;
+        font-size: 8px;
+        font-weight: 900;
+    }
+    .watch-empty { color: #82909d; font-size: 11px; padding: 4px 0 14px; }
     .news-feed {
         margin: 0 0 22px;
         border-top: 1px solid rgba(180, 190, 201, 0.14);
@@ -193,7 +225,7 @@ st.markdown("""
         min-height: 38px;
         border: 1px solid rgba(101, 217, 255, 0.3);
         border-radius: 9px;
-        background: rgba(43, 48, 56, 0.76);
+        background: rgba(51, 61, 68, 0.76);
         color: #e7eaee;
         font-weight: 800;
         letter-spacing: 0.04em;
@@ -210,6 +242,28 @@ st.markdown("""
         background: linear-gradient(135deg, #087f6a, #35d0a0);
         color: #071714;
         box-shadow: 0 6px 18px rgba(53, 208, 160, 0.22);
+    }
+    [data-testid="stButton"] button[kind="secondary"] {
+        border-color: rgba(101, 217, 255, 0.28);
+        background: rgba(39, 51, 60, 0.82);
+        color: #dcecf2;
+    }
+    [data-testid="stButton"] button[kind="secondary"]:hover {
+        border-color: #65d9ff;
+        background: rgba(53, 81, 91, 0.92);
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        min-height: 42px;
+        border: 1px solid rgba(101, 217, 255, 0.22);
+        border-radius: 11px;
+        background: rgba(33, 43, 49, 0.82);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+        border-radius: 999px;
+        background: rgba(53, 208, 160, 0.18);
+        color: #b8f3db;
     }
     @media (max-width: 760px) { .news-grid { grid-template-columns: 1fr; } }
     .market-ticker {
@@ -514,6 +568,14 @@ def get_api_key(name: str) -> str:
         return str(st.secrets.get(name, ""))
     except Exception:
         return ""
+
+
+def watch_avatar(name: str) -> str:
+    """Creates a stable compact mark for the selected ticker."""
+    words = [word for word in re.split(r"\s+", name.replace("· BIST100", "").strip()) if word]
+    if len(words) > 1:
+        return (words[0][0] + words[1][0]).upper()
+    return words[0][:2].upper() if words else "--"
 
 
 API_KEY = get_api_key("GEMINI_API_KEY")
@@ -1120,13 +1182,13 @@ title_col, market_col, trading_col, news_col, refresh_col = st.columns([3, 1.5, 
 with title_col:
     st.markdown('<div class="trading-title">⚡ Hızlı & Akıllı Terminal</div>', unsafe_allow_html=True)
 with market_col:
-    if st.button("PİYASA", use_container_width=True, help="Piyasa analizini göster"):
+    if st.button("▦ PİYASA", use_container_width=True, help="Piyasa analizini göster"):
         st.session_state.active_view = "market"
 with trading_col:
-    if st.button("TRADEING", type="primary", use_container_width=True, help="Day trading görünümünü aç"):
+    if st.button("⌁ TRADING", type="secondary", use_container_width=True, help="Day trading görünümünü aç"):
         st.session_state.active_view = "trading"
 with news_col:
-    if st.button("HABERLER", use_container_width=True, help="Türkçe haber özetlerini aç"):
+    if st.button("◌ HABERLER", type="secondary", use_container_width=True, help="Türkçe haber özetlerini aç"):
         st.session_state.active_view = "news"
 with refresh_col:
     if st.button("VERİLERİ YENİLE", icon=":material/refresh:", use_container_width=True, help="Grafik, indikatör ve piyasa verilerini güncelle"):
@@ -1141,20 +1203,33 @@ with refresh_col:
 
 toolbar_col, index_col, status_col = st.columns([4, 2.4, 3.6], gap="large")
 with toolbar_col:
-    st.markdown('<div class="topbar-label">TAKİP LİSTESİ · POPÜLER BIST30 ÜSTTE</div>', unsafe_allow_html=True)
-    selected_stocks = st.multiselect(
-        "Takip hisseleri",
-        WATCHLIST_OPTIONS,
+    st.markdown('<div class="topbar-label">TAKİP LİSTESİ</div>', unsafe_allow_html=True)
+    selected_bist30 = st.multiselect(
+        "BIST30 · popüler hisseler üstte",
+        POPULAR_BIST30 + [name for name in BIST30 if name not in POPULAR_BIST30],
         default=["TÜPRAŞ", "ASELSAN"],
-        placeholder="Hisse ara ve takip listene ekle",
-        label_visibility="collapsed",
+        placeholder="BIST30 hissesi seç",
     )
+    selected_bist100 = st.multiselect(
+        "BIST100 · diğer hisseler",
+        list(BIST100_STOCKS),
+        placeholder="BIST100 hissesi seç",
+    )
+    selected_stocks = selected_bist30 + selected_bist100
 with index_col:
     st.markdown('<div class="topbar-label">ENDEKSLER</div>', unsafe_allow_html=True)
     selected_index = st.selectbox("BIST100", list(BIST100_MARKETS), label_visibility="collapsed")
 with status_col:
     st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
 selected_symbols = [STOCK_UNIVERSE[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
+if selected_stocks:
+    chips = "".join(
+        f"<span class='watch-chip'><span class='watch-avatar'>{escape(watch_avatar(name))}</span>{escape(name.replace(' · BIST100', ''))}</span>"
+        for name in selected_stocks
+    )
+    st.markdown(f"<div class='watchlist-preview'>{chips}</div>", unsafe_allow_html=True)
+else:
+    st.markdown("<div class='watch-empty'>Takip listene hızlıca hisse ekle.</div>", unsafe_allow_html=True)
 render_analyst_sidebar(selected_symbols)
 st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
