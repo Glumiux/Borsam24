@@ -21,6 +21,12 @@ try:
 except ImportError:
     Anthropic = None
 
+try:
+    from tvDatafeed import Interval, TvDatafeed
+except ImportError:
+    Interval = None
+    TvDatafeed = None
+
 # ==========================================
 # 1. TEMA VE SAYFA AYARLARI
 # ==========================================
@@ -724,6 +730,8 @@ def watch_avatar(name: str) -> str:
 
 API_KEY = get_api_key("GEMINI_API_KEY")
 CLAUDE_API_KEY = get_api_key("ANTHROPIC_API_KEY") or get_api_key("CLAUDE_API_KEY")
+TV_USERNAME = get_api_key("TV_USERNAME")
+TV_PASSWORD = get_api_key("TV_PASSWORD")
 
 BIST30 = {
     "AKBANK": "AKBNK.IS", "ALARKO HOLDİNG": "ALARK.IS", "ASELSAN": "ASELS.IS",
@@ -785,11 +793,48 @@ def fetch_stock_data(symbol: str, timeframe: str = "1Y"):
     df['Vol_SMA'] = df['Volume'].rolling(20).mean()
     return df
 
+@st.cache_resource(show_spinner=False)
+def get_tradingview_client():
+    if TvDatafeed is None:
+        return None
+    try:
+        if TV_USERNAME and TV_PASSWORD:
+            return TvDatafeed(username=TV_USERNAME, password=TV_PASSWORD)
+        return TvDatafeed()
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=15)
+def fetch_tradingview_bars(symbol: str):
+    """Fetches BIST one-minute bars when the TradingView feed is available."""
+    client = get_tradingview_client()
+    if client is None:
+        return None
+    try:
+        bars = client.get_hist(
+            symbol=symbol.removesuffix(".IS"),
+            exchange="BIST",
+            interval=Interval.in_1_minute,
+            n_bars=250,
+            extended_session=False,
+        )
+        if bars is None or bars.empty:
+            return None
+        bars = bars.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"})
+        required = {"Open", "High", "Low", "Close", "Volume"}
+        return bars if required.issubset(bars.columns) else None
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=15)
 def fetch_live_quote(symbol: str):
     """Kisa vadeli fiyat karti icin 1 dakikalik son fiyati getirir."""
     try:
-        df = yf.download(symbol, period="1d", interval="1m", progress=False, auto_adjust=False, prepost=False)
+        df = fetch_tradingview_bars(symbol)
+        if df is None:
+            df = yf.download(symbol, period="1d", interval="1m", progress=False, auto_adjust=False, prepost=False)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         required = {"Open", "High", "Low", "Close", "Volume"}
@@ -843,7 +888,7 @@ def render_live_strip(symbol: str, fallback_price: float, fallback_change: float
     freshness = f"veri {age_seconds} sn önce" if age_seconds is not None else "veri zamanı bilinmiyor"
     freshness_color = "#ff7c8e" if age_seconds is not None and age_seconds > 180 else "#aeb7c1"
     st.markdown(
-        f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
+        f"<div class='live-strip'><div><div class='live-label'>CANLI BAR · 1 DK</div>"
         f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
         f"<div class='live-time'>{live_change:+.2f}% günlük<br>{escape(str(live_updated))}<br><span style='color:{freshness_color}'>{freshness}</span></div></div>",
         unsafe_allow_html=True,
