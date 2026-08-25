@@ -416,7 +416,6 @@ st.markdown("""
     .live-label { color: #79e6b2; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; }
     .live-value { color: #ffffff; font-size: 20px; font-weight: 900; }
     .live-time { color: #aeb7c1; font-size: 10px; text-align: right; }
-    .news-link { color: #65d9ff; font-size: 10px; font-weight: 800; text-decoration: none; }
     .indicator-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -925,7 +924,7 @@ def fetch_followed_news(symbols):
     for source, feed_url in feeds.items():
         try:
             root = ElementTree.fromstring(requests.get(feed_url, timeout=4).content)
-            for item in root.findall(".//item")[:8]:
+            for item in root.findall(".//item")[:3]:
                 title = (item.findtext("title") or "").strip()
                 url = (item.findtext("link") or "").strip()
                 published = (item.findtext("pubDate") or "Güncel").strip()
@@ -944,11 +943,11 @@ def fetch_followed_news(symbols):
                         news_items.append({"symbol": symbol.replace(".IS", ""), "title": title, "source": source or "Yahoo Finance", "time": published, "url": url})
             except Exception:
                 continue
-    return news_items[:24]
+    return news_items[:6]
 
 @st.cache_data(ttl=1800)
 def summarize_news_items(news_items):
-    """Kaynak basliklarini tek Gemini cagrisinda kisa Turkce ozetlere cevirir."""
+    """Az sayida haber basligini tek AI cagrisinda kisa Turkce ozete cevirir."""
     news_items = [dict(item) for item in news_items]
     if not news_items:
         return []
@@ -956,7 +955,7 @@ def summarize_news_items(news_items):
     prompt = f"""
 ZORUNLU ÇIKTI DİLİ: TÜRKÇE.
 Aşağıdaki haberleri Türkçeye çevir. Her satır için başlığı ve tek kısa, tarafsız özeti üret.
-Çıktı formatı kesinlikle NUMARA|TÜRKÇE BAŞLIK|TÜRKÇE ÖZET olsun. Yatırım tavsiyesi veya yeni bilgi ekleme.
+    Çıktı formatı kesinlikle NUMARA|TÜRKÇE BAŞLIK|TEK CÜMLELİK TÜRKÇE ÖZET olsun. Her özeti en fazla 18 kelime yap. Yatırım tavsiyesi veya yeni bilgi ekleme.
 
 {titles}
 """
@@ -964,7 +963,7 @@ Aşağıdaki haberleri Türkçeye çevir. Her satır için başlığı ve tek k�
         if CLAUDE_API_KEY and Anthropic is not None:
             response = Anthropic(api_key=CLAUDE_API_KEY).messages.create(
                 model="claude-3-5-haiku-latest",
-                max_tokens=700,
+                max_tokens=420,
                 system="Haber başlıklarını Türkçe, tarafsız ve kısa özetleyen finans editörüsün.",
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -999,8 +998,7 @@ def render_sidebar_news(symbols):
         f"<span class='news-source'>{escape(str(item['source']))}</span></div>"
         f"<div class='news-title'>{escape(str(item['title']))}</div>"
         f"<div class='news-summary'>{escape(str(item.get('summary', '')))}</div>"
-        f"<div class='news-time'>{escape(str(item['time']))} "
-        f"<a class='news-link' href='{escape(str(item.get('url', '')))}' target='_blank'>Haberi aç ↗</a></div></article>"
+        f"<div class='news-time'>{escape(str(item['time']))}</div></article>"
         for item in news_items
     )
     st.markdown(f"<div class='news-grid'>{items}</div>", unsafe_allow_html=True)
