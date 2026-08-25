@@ -120,6 +120,56 @@ st.markdown("""
         font-weight: 900;
     }
     .watch-empty { color: #82909d; font-size: 11px; padding: 4px 0 14px; }
+    .section-kicker {
+        margin: 20px 0 8px;
+        color: #6f8790;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+    .portfolio-summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin: 8px 0 18px;
+    }
+    .portfolio-stat {
+        padding: 13px 15px;
+        border: 1px solid rgba(101, 217, 255, 0.14);
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(37, 53, 60, 0.86), rgba(26, 35, 41, 0.82));
+        animation: card-enter 0.4s ease both;
+    }
+    .portfolio-stat-label { color: #8da5ad; font-size: 10px; font-weight: 800; }
+    .portfolio-stat-value { margin-top: 5px; color: #f4f8f8; font-size: 18px; font-weight: 900; }
+    .portfolio-stat-positive { color: #58e0ad; }
+    .portfolio-stat-negative { color: #ff7c8e; }
+    .market-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 4px 0 12px;
+        padding: 5px 9px;
+        border: 1px solid rgba(53, 208, 160, 0.22);
+        border-radius: 999px;
+        background: rgba(53, 208, 160, 0.08);
+        color: #9cebc9;
+        font-size: 10px;
+        font-weight: 800;
+    }
+    .market-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #35d0a0; box-shadow: 0 0 9px #35d0a0; }
+    .portfolio-empty {
+        margin: 8px 0 18px;
+        padding: 16px;
+        border: 1px dashed rgba(101, 217, 255, 0.24);
+        border-radius: 12px;
+        background: rgba(34, 47, 53, 0.48);
+        color: #a7bbc1;
+        font-size: 11px;
+        line-height: 1.5;
+    }
+    @media (max-width: 700px) { .portfolio-summary { grid-template-columns: 1fr; } }
     .news-feed {
         margin: 0 0 22px;
         border-top: 1px solid rgba(180, 190, 201, 0.14);
@@ -1172,6 +1222,57 @@ def render_market_ticker():
         unsafe_allow_html=True,
     )
 
+
+def render_portfolio_panel():
+    """Displays a lightweight local portfolio tracker without a database."""
+    with st.sidebar.expander("Portföy takibi", expanded=False):
+        st.caption("Pozisyonlarını bu oturumda takip et. Emir göndermez.")
+        positions = []
+        for index in range(1, 4):
+            selected = st.selectbox(
+                f"Pozisyon {index}", ["Seçme"] + list(STOCK_UNIVERSE), key=f"portfolio_symbol_{index}"
+            )
+            quantity = st.number_input(
+                "Adet", min_value=0.0, step=1.0, key=f"portfolio_quantity_{index}"
+            )
+            average_cost = st.number_input(
+                "Ortalama maliyet", min_value=0.0, step=0.01, key=f"portfolio_cost_{index}"
+            )
+            if selected != "Seçme" and quantity > 0 and average_cost > 0:
+                positions.append((selected, quantity, average_cost))
+        if not positions:
+            st.markdown('<div class="portfolio-empty">Pozisyon eklediğinde toplam değer ve kâr/zararı burada göreceksin.</div>', unsafe_allow_html=True)
+            return
+        total_cost = 0.0
+        total_value = 0.0
+        for selected, quantity, average_cost in positions:
+            quote = fetch_live_quote(STOCK_UNIVERSE[selected])
+            current_price = quote[0] if quote else average_cost
+            total_cost += quantity * average_cost
+            total_value += quantity * current_price
+        profit = total_value - total_cost
+        profit_class = "portfolio-stat-positive" if profit >= 0 else "portfolio-stat-negative"
+        profit_percent = profit / total_cost * 100 if total_cost else 0
+        st.markdown(
+            f"<div class='portfolio-summary'><div class='portfolio-stat'><div class='portfolio-stat-label'>TOPLAM DEĞER</div>"
+            f"<div class='portfolio-stat-value'>{total_value:,.2f} TL</div></div>"
+            f"<div class='portfolio-stat'><div class='portfolio-stat-label'>MALİYET</div>"
+            f"<div class='portfolio-stat-value'>{total_cost:,.2f} TL</div></div>"
+            f"<div class='portfolio-stat'><div class='portfolio-stat-label'>KÂR / ZARAR</div>"
+            f"<div class='portfolio-stat-value {profit_class}'>{profit:+,.2f} TL ({profit_percent:+.2f}%)</div></div></div>",
+            unsafe_allow_html=True,
+        )
+
+
+def render_market_status():
+    """Shows the Borsa Istanbul session state using fixed UTC+3 time."""
+    now = datetime.now(timezone.utc)
+    istanbul_hour = (now.hour + 3) % 24
+    is_open = now.weekday() < 5 and 10 <= istanbul_hour < 18
+    label = "PİYASA AÇIK" if is_open else "PİYASA KAPALI"
+    color = "#35d0a0" if is_open else "#f3c969"
+    return f"<div class='market-status' style='color:{color};'><span class='market-status-dot' style='background:{color};box-shadow:0 0 9px {color};'></span>{label} · BIST seansı</div>"
+
 # ==========================================
 # 4. ANA EKRAN (GRAFİK + CANLI KARTLAR)
 # ==========================================
@@ -1221,6 +1322,7 @@ with index_col:
     selected_index = st.selectbox("BIST100", list(BIST100_MARKETS), label_visibility="collapsed")
 with status_col:
     st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
+    st.markdown(render_market_status(), unsafe_allow_html=True)
 selected_symbols = [STOCK_UNIVERSE[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
 if selected_stocks:
     chips = "".join(
@@ -1230,6 +1332,7 @@ if selected_stocks:
     st.markdown(f"<div class='watchlist-preview'>{chips}</div>", unsafe_allow_html=True)
 else:
     st.markdown("<div class='watch-empty'>Takip listene hızlıca hisse ekle.</div>", unsafe_allow_html=True)
+render_portfolio_panel()
 render_analyst_sidebar(selected_symbols)
 st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
