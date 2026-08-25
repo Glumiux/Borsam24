@@ -13,6 +13,11 @@ from google import genai
 import time
 import os
 
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
 # ==========================================
 # 1. TEMA VE SAYFA AYARLARI
 # ==========================================
@@ -472,7 +477,19 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-API_KEY = os.getenv("GEMINI_API_KEY", "")
+def get_api_key(name: str) -> str:
+    """Local environment and Streamlit Cloud secrets use the same key path."""
+    value = os.getenv(name, "")
+    if value:
+        return value
+    try:
+        return str(st.secrets.get(name, ""))
+    except Exception:
+        return ""
+
+
+API_KEY = get_api_key("GEMINI_API_KEY")
+CLAUDE_API_KEY = get_api_key("ANTHROPIC_API_KEY") or get_api_key("CLAUDE_API_KEY")
 
 BIST30 = {
     "AKBANK": "AKBNK.IS", "ALARKO HOLDİNG": "ALARK.IS", "ASELSAN": "ASELS.IS",
@@ -507,7 +524,7 @@ def fetch_stock_data(symbol: str, timeframe: str = "1Y"):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     df = df.ffill().dropna()
-    
+
     df['RSI'] = RSIIndicator(close=df['Close'], window=14).rsi()
     df['EMA_20'] = EMAIndicator(close=df['Close'], window=20).ema_indicator()
     df['EMA_50'] = EMAIndicator(close=df['Close'], window=50).ema_indicator()
@@ -527,13 +544,13 @@ def fetch_stock_data(symbol: str, timeframe: str = "1Y"):
     df['Vol_SMA'] = df['Volume'].rolling(20).mean()
     return df
 
-@st.cache_data(ttl=90)
+@st.cache_data(ttl=20)
 def fetch_day_trading_data(symbol: str):
-    """5 dakikalik veriden gun ici sinyal icin gerekli gostergeleri uretir."""
+    """1 dakikalik veriden gun ici sinyal icin gerekli gostergeleri uretir."""
     df = yf.download(
         symbol,
-        period="5d",
-        interval="5m",
+        period="1d",
+        interval="1m",
         progress=False,
         auto_adjust=False,
         prepost=False,
@@ -555,7 +572,7 @@ def fetch_day_trading_data(symbol: str):
 
 def get_day_trading_signal(df):
     if df.empty:
-        return {"action": "VERİ YOK", "class": "indicator-neutral", "price": None, "entry": None, "stop": None, "target": None, "note": "5 dakikalık veri alınamadı."}
+        return {"action": "VERİ YOK", "class": "indicator-neutral", "price": None, "entry": None, "stop": None, "target": None, "note": "1 dakikalık veri alınamadı."}
     last = df.iloc[-1]
     bullish = last["EMA_9"] > last["EMA_21"] and last["Close"] > last["VWAP"] and 52 <= last["RSI"] <= 70
     bearish = last["EMA_9"] < last["EMA_21"] and last["Close"] < last["VWAP"] and 30 <= last["RSI"] <= 48
@@ -699,33 +716,51 @@ def get_smart_fallback_analysis(name, last, pct_change):
     """Renklendirilmiş canlı piyasa özeti"""
     rsi = last['RSI']
     vol_ratio = (last['Volume'] / last['Vol_SMA']) if last['Vol_SMA'] > 0 else 1.0
-    
+
     analysis = f"**{name}** şu an **{last['Close']:.2f} TL** seviyesinde ve günlük **%{pct_change:+.2f}** değişim gösteriyor. "
-    
+
     if rsi > 70:
         analysis += "<span style='color:#ef4444; font-weight:bold;'>Aşırı alım (şişkinlik)</span> bölgesinde. Hisse çok hızlı yükseldiği için kısa vadede <span style='color:#ef4444; font-weight:bold;'>kâr satışları riski</span> oldukça yüksek. "
     elif rsi < 35:
         analysis += "RSI dip seviyelerde. Hisse şu an tepki alımlarına açık, <span style='color:#10b981; font-weight:bold;'>ucuz ve cazip (fırsat)</span> bir bölgede yer alıyor. "
     else:
         analysis += "Fiyat hareketleri şu an <span style='color:#FFD700; font-weight:bold;'>nötr ve dengeli</span> kulvarda ilerliyor. "
-        
+
     if vol_ratio > 1.3:
         analysis += "İşlem hacmi ortalamanın %30 üzerinde; tahtada <span style='color:#38bdf8; font-weight:bold;'>büyük oyuncu (balina) hareketliliği</span> var."
     else:
         analysis += "İşlem hacmi <span style='color:#94a3b8;'>olağan seviyelerde</span>, panik yapılacak bir durum yok."
-        
+
     if "TÜPRAŞ" in name:
         analysis += "<br><br>🛢️ *Not: Brent petrol fiyatlarındaki hareketlilik TÜPRAŞ marjlarını doğrudan etkiler, haber akışını takip et.*"
     elif "THY" in name or "PEGASUS" in name:
         analysis += "<br><br>✈️ *Not: Turizm verileri ve jet yakıtı (petrol) maliyetleri yönü belirleyecektir.*"
-        
+
     return analysis
 
-def auto_ask_gemini(name, last, pct_change, prompt: str):
-    """API yoğunluk verirse anında renkli şablonu basar"""
+@st.cache_data(ttl=120)
+def auto_ask_ai(name, symbol, close, rsi, volume, volume_average, pct_change, prompt: str):
+    """AI yorumunu kısa süre önbellekte tutarak her Streamlit yenilemesinde çağrı yapmaz."""
+    last = {"Close": close, "RSI": rsi, "Volume": volume, "Vol_SMA": volume_average}
+    if CLAUDE_API_KEY and Anthropic is not None:
+        try:
+            response = Anthropic(api_key=CLAUDE_API_KEY).messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=500,
+                system="Türkçe konuşan, temkinli bir finans analiz asistanısın. Veri uydurma ve yatırım tavsiyesi verme.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = "".join(block.text for block in response.content if hasattr(block, "text"))
+            if text:
+                return text
+        except Exception:
+            pass
     try:
-        client = genai.Client(api_key=API_KEY)
-        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        if not API_KEY:
+            return get_smart_fallback_analysis(name, last, pct_change)
+        response = genai.Client(api_key=API_KEY).models.generate_content(
+            model="gemini-1.5-flash", contents=prompt
+        )
         if response.text:
             return response.text
         else:
@@ -859,23 +894,21 @@ Sadece numaralı satırları döndür; yorum, yatırım tavsiyesi veya yeni bilg
     except Exception:
         return [dict(item) for item in news_items]
 
-@st.fragment(run_every="1s")
 def render_sidebar_news(symbols):
-    with st.sidebar.expander("📰 Takip haberleri", expanded=True):
-        remaining = 180 - (int(time.time()) % 180)
-        st.caption(f"Kısa Türkçe özet · yeni tarama: {remaining} sn")
-        news_items = fetch_followed_news(tuple(symbols))
-        if not news_items:
-            st.markdown('<div class="sidebar-news-empty">Seçili hisseler için güncel haber bulunamadı.</div>', unsafe_allow_html=True)
-            return
-        news_items = summarize_news_items(tuple(tuple(sorted(item.items())) for item in news_items))
-        items = "".join(
-            f"<div class='sidebar-news-item'><span class='sidebar-news-meta'>{escape(item['symbol'])}</span>"
-            f"<span class='sidebar-news-source'>{escape(str(item['source']))} · {escape(str(item['time']))}</span>"
-            f"<div class='sidebar-news-title'>{escape(str(item['title']))}</div></div>"
-            for item in news_items
-        )
-        st.markdown(f"<div class='sidebar-news-feed'>{items}</div>", unsafe_allow_html=True)
+    st.markdown('<div class="news-section-title">Haberler <span>Takip listesinden Türkçe kısa özetler</span></div>', unsafe_allow_html=True)
+    news_items = fetch_followed_news(tuple(symbols))
+    if not news_items:
+        st.info("Seçili hisseler için güncel haber bulunamadı.")
+        return
+    news_items = summarize_news_items(tuple(tuple(sorted(item.items())) for item in news_items))
+    items = "".join(
+        f"<article class='news-card'><div><span class='news-symbol'>{escape(item['symbol'])}</span>"
+        f"<span class='news-source'>{escape(str(item['source']))}</span></div>"
+        f"<div class='news-title'>{escape(str(item['title']))}</div>"
+        f"<div class='news-time'>{escape(str(item['time']))}</div></article>"
+        for item in news_items
+    )
+    st.markdown(f"<div class='news-grid'>{items}</div>", unsafe_allow_html=True)
 
 @st.cache_data(ttl=300)
 def fetch_analyst_overview(symbols):
@@ -990,7 +1023,7 @@ def render_market_ticker():
 if "active_view" not in st.session_state:
     st.session_state.active_view = "market"
 
-title_col, market_col, trading_col, refresh_col = st.columns([3, 2, 2, 3], gap="small")
+title_col, market_col, trading_col, news_col, refresh_col = st.columns([3, 1.5, 1.5, 1.5, 2.5], gap="small")
 with title_col:
     st.markdown('<div class="trading-title">⚡ Hızlı & Akıllı Terminal</div>', unsafe_allow_html=True)
 with market_col:
@@ -999,6 +1032,9 @@ with market_col:
 with trading_col:
     if st.button("TRADEING", type="primary", use_container_width=True, help="Day trading görünümünü aç"):
         st.session_state.active_view = "trading"
+with news_col:
+    if st.button("HABERLER", use_container_width=True, help="Türkçe haber özetlerini aç"):
+        st.session_state.active_view = "news"
 with refresh_col:
     if st.button("VERİLERİ YENİLE", icon=":material/refresh:", use_container_width=True, help="Grafik, indikatör ve piyasa verilerini güncelle"):
         fetch_stock_data.clear()
@@ -1019,12 +1055,14 @@ with toolbar_col:
 with status_col:
     st.markdown('<div class="topbar-label">PİYASA 60 sn · TEKNİK VERİ 900 sn · TEMEL VERİ 900 sn</div>', unsafe_allow_html=True)
 selected_symbols = [BIST30[name] for name in selected_stocks]
-render_sidebar_news(selected_symbols)
 render_analyst_sidebar(selected_symbols)
 st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
+if st.session_state.active_view == "news":
+    render_sidebar_news(selected_symbols)
+
 if st.session_state.active_view == "trading" and selected_stocks:
-    st.markdown('<div class="trade-card"><div class="fundamental-header">Day trading sinyalleri</div><div class="levels-note">5 dakikalık veri · sinyal garanti değildir; risk yönetimi ve emir kararını kullanıcı verir.</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="trade-card"><div class="fundamental-header">Day trading sinyalleri</div><div class="levels-note">1 dakikalık veri · sinyal garanti değildir; risk yönetimi ve emir kararını kullanıcı verir.</div></div>', unsafe_allow_html=True)
     trade_cols = st.columns(min(len(selected_stocks), 3))
     for index, name in enumerate(selected_stocks):
         trade_df = fetch_day_trading_data(BIST30[name])
@@ -1205,7 +1243,7 @@ elif st.session_state.active_view == "market":
                 """, unsafe_allow_html=True)
 
                 render_fundamental_panel(symbol)
-                
+
                 # 1. AI Yorum Kartı
                 fundamental_context = format_fundamental_context(symbol)
                 prompt_data = f"""
@@ -1217,8 +1255,17 @@ elif st.session_state.active_view == "market":
 
                 {fundamental_context}
                 """
-                ai_response = auto_ask_gemini(name, last, pct_change, prompt_data)
-                
+                ai_response = auto_ask_ai(
+                    name,
+                    symbol,
+                    float(last['Close']),
+                    float(last['RSI']),
+                    float(last['Volume']),
+                    float(last['Vol_SMA']),
+                    float(pct_change),
+                    prompt_data,
+                )
+
                 st.markdown(f"""
                 <div class='ai-card'>
                     <div style='color:#00E5FF; font-weight:bold; margin-bottom:8px; font-size:15px;'>📰 Güncel Haber & Bilanço:</div>
@@ -1227,7 +1274,6 @@ elif st.session_state.active_view == "market":
                 """, unsafe_allow_html=True)
 
             st.write("---")
-            
+
         except Exception as e:
             st.error(f"{name} verisi yüklenirken hata oluştu.")
-            
