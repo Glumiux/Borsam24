@@ -729,9 +729,13 @@ def fetch_live_quote(symbol: str):
         if len(df) < 2:
             return None
         current = float(df["Close"].iloc[-1])
-        previous = float(df["Close"].iloc[-2])
-        change = ((current - previous) / previous) * 100 if previous else 0
-        return current, change, df.index[-1].strftime("%d.%m %H:%M"), df.iloc[-1]
+        daily_df = yf.download(symbol, period="5d", interval="1d", progress=False, auto_adjust=False)
+        if isinstance(daily_df.columns, pd.MultiIndex):
+            daily_df.columns = daily_df.columns.get_level_values(0)
+        daily_closes = daily_df["Close"].dropna()
+        previous_close = float(daily_closes.iloc[-2]) if len(daily_closes) >= 2 else current
+        daily_change = ((current - previous_close) / previous_close) * 100 if previous_close else 0
+        return current, daily_change, df.index[-1].strftime("%d.%m %H:%M"), df.iloc[-1]
     except Exception:
         return None
 
@@ -746,7 +750,7 @@ def render_live_strip(symbol: str, fallback_price: float, fallback_change: float
     st.markdown(
         f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
         f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
-        f"<div class='live-time'>{live_change:+.2f}%<br>{escape(str(live_updated))}</div></div>",
+        f"<div class='live-time'>{live_change:+.2f}% günlük<br>{escape(str(live_updated))}</div></div>",
         unsafe_allow_html=True,
     )
 
@@ -897,7 +901,7 @@ def auto_ask_ai(name, symbol, close, rsi, volume, volume_average, pct_change, pr
             response = Anthropic(api_key=CLAUDE_API_KEY).messages.create(
                 model="claude-3-5-haiku-latest",
                 max_tokens=500,
-                system="Türkçe konuşan, temkinli bir finans analiz asistanısın. Veri uydurma ve yatırım tavsiyesi verme. Günlük değişimi yalnızca promptta 'Günlük kapanış değişimi' olarak verilen yüzdeyle yorumla; 'Seans içi 1 dakikalık değişim'i günlük değişim olarak adlandırma.",
+                system="Türkçe konuşan, temkinli bir finans analiz asistanısın. Veri uydurma ve yatırım tavsiyesi verme. Günlük değişimi yalnızca promptta 'Günlük değişim' olarak verilen yüzdeyle yorumla.",
                 messages=[{"role": "user", "content": prompt}],
             )
             text = "".join(block.text for block in response.content if hasattr(block, "text"))
@@ -933,61 +937,6 @@ def normalize_news_item(item):
     link_data = content.get("canonicalUrl") or content.get("clickThroughUrl") or item.get("link") or {}
     url = link_data.get("url") if isinstance(link_data, dict) else link_data
     return str(title).strip() if title else "", publisher, published or "Güncel", str(url or "")
-
-@st.cache_data(ttl=900)
-def fetch_fundamental_context(symbol: str):
-    """Bilanço özeti ve haber başlıklarını AI analizine taşır."""
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info or {}
-        financials = {
-            "Şirket": info.get("longName") or info.get("shortName") or symbol,
-            "Sektör": info.get("sector") or "Belirtilmemiş",
-            "Piyasa değeri": info.get("marketCap"),
-            "F/K": info.get("trailingPE"),
-            "PD/DD": info.get("priceToBook"),
-            "Son çeyrek gelir": info.get("totalRevenue"),
-            "Kâr marjı": info.get("profitMargins"),
-            "Borç/özsermaye": info.get("debtToEquity"),
-        }
-        news_lines = []
-        for item in (ticker.news or [])[:6]:
-            title, publisher, _, _ = normalize_news_item(item)
-            if title:
-                news_lines.append(f"- {title} ({publisher or 'kaynak belirtilmemiş'})")
-        return financials, news_lines
-    except Exception:
-        return {}, []
-
-def format_fundamental_context(symbol: str):
-    financials, news_lines = fetch_fundamental_context(symbol)
-    metrics = "\n".join(
-        f"- {key}: {value}" for key, value in financials.items() if value is not None
-    ) or "- Temel veri alınamadı; kesin yorum yapılmamalı."
-    news = "\n".join(news_lines) or "- Son haber başlığı alınamadı."
-    return f"ŞİRKET VE FİNANSALLAR:\n{metrics}\n\nSON HABERLER:\n{news}"
-
-def render_fundamental_panel(symbol: str):
-    financials, _ = fetch_fundamental_context(symbol)
-    st.markdown('<div class="fundamental-header">Temel veriler</div>', unsafe_allow_html=True)
-    cards = []
-    for key, value in financials.items():
-        if value is None:
-            continue
-        if isinstance(value, float) and key == "Kâr marjı":
-            value = f"%{value * 100:.1f}"
-        elif isinstance(value, (int, float)):
-            value = f"{value:,.2f}"
-        cards.append(
-            f"<div class='fundamental-item'><div class='fundamental-label'>{escape(str(key))}</div>"
-            f"<div class='fundamental-value'>{escape(str(value))}</div></div>"
-        )
-    st.markdown(
-        "<div class='fundamental-grid'>" + "".join(cards or [
-            "<div class='fundamental-item'><div class='fundamental-value'>Temel veri alınamadı.</div></div>"
-        ]) + "</div>",
-        unsafe_allow_html=True,
-    )
 
 @st.cache_data(ttl=180)
 def fetch_followed_news(symbols):
@@ -1271,7 +1220,7 @@ Türkçe ve çok kısa bir günlük finans otomasyonu özeti yaz.
 {name} ({symbol}) için yalnızca verilen veriyi kullan, yatırım tavsiyesi verme.
 3 kısa madde üret: Durum, Risk, İzlenecek.
 Günlük kapanış değişimi: %{daily_change:+.2f}
-Seans içi değişim: %{session_change:+.2f}
+Günlük değişim: %{session_change:+.2f}
 Son fiyat: {live_price:.2f} TL
 Sinyal motoru: {signal}
 RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last['EMA_50']:.2f}
@@ -1283,7 +1232,7 @@ RSI: {live_last['RSI']:.1f}, EMA20: {live_last['EMA_20']:.2f}, EMA50: {live_last
         )
         st.markdown(
             f"<div class='trade-card'><div class='live-label'>{escape(name)} · SON KONTROL {escape(str(updated))}</div>"
-            f"<div class='live-value'>{live_price:,.2f} TL <span style='font-size:12px;color:#aeb7c1'>{session_change:+.2f}% seans</span></div>"
+            f"<div class='live-value'>{live_price:,.2f} TL <span style='font-size:12px;color:#aeb7c1'>{session_change:+.2f}% günlük</span></div>"
             f"<div class='trade-action' style='background:{signal_background};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent'>{escape(signal)}</div>"
             f"<div class='levels-note'>{analysis}</div></div>", unsafe_allow_html=True,
         )
@@ -1377,25 +1326,22 @@ elif st.session_state.active_view == "market":
             live_price, live_change, live_updated, indicator_last = live_quote or (
                 float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last
             )
-            fundamental_context = format_fundamental_context(symbol)
             prompt_data = f"""
             Sen temkinli bir finans analistisin. {name} ({symbol}) için güncel teknik veriyi Türkçe ve kısa yorumla.
             Yatırım tavsiyesi verme; veri eksikse bunu söyle, rakam uydurma.
             En fazla 4 kısa madde kullan: Yön, Momentum, Risk, İzlenecek seviye.
             1 dakikalık son fiyat: {live_price:.2f} TL
-            Seans içi 1 dakikalık değişim: %{live_change:+.2f}
-            Günlük kapanış değişimi: %{pct_change:+.2f}
+            Günlük değişim: %{live_change:+.2f}
             1 dakikalık teknik veri: RSI: {indicator_last['RSI']:.1f}, EMA20: {indicator_last['EMA_20']:.2f}, EMA50: {indicator_last['EMA_50']:.2f}
             Destek: {support:.2f}, direnç: {resistance:.2f}
 
-            {fundamental_context}
             """
             ai_response = auto_ask_ai(
                 name, symbol, live_price, float(indicator_last['RSI']), float(indicator_last['Volume']),
                 float(indicator_last['Vol_SMA']), live_change, prompt_data,
             )
 
-            st.markdown(f"### {name} &nbsp; <span style='font-size:1.1rem; color:{'#10b981' if pct_change>=0 else '#ef4444'};'>({pct_change:+.2f}%)</span>", unsafe_allow_html=True)
+            st.markdown(f"### {name} &nbsp; <span style='font-size:1.1rem; color:{'#10b981' if live_change>=0 else '#ef4444'};'>({live_change:+.2f}%)</span>", unsafe_allow_html=True)
 
             col_chart, col_info = st.columns([5, 5], gap="large")
 
@@ -1545,8 +1491,6 @@ elif st.session_state.active_view == "market":
                     {indicator_cards}
                 </div>
                 """, unsafe_allow_html=True)
-
-                render_fundamental_panel(symbol)
 
             st.write("---")
 
