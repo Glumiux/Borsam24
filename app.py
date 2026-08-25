@@ -49,7 +49,8 @@ st.markdown("""
         height: 0;
     }
     header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"],
-    header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] {
+    header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"],
+    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] {
         display: flex !important;
         visibility: visible !important;
         opacity: 1 !important;
@@ -59,7 +60,8 @@ st.markdown("""
         z-index: 10 !important;
     }
     header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"] button,
-    header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] button {
+    header[data-testid="stHeader"] [data-testid="stSidebarCollapseButton"] button,
+    header[data-testid="stHeader"] [data-testid="stExpandSidebarButton"] button {
         min-height: 1.25rem !important;
         width: 2rem !important;
         padding: 0 !important;
