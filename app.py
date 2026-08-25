@@ -754,6 +754,21 @@ def fetch_live_quote(symbol: str):
     except Exception:
         return None
 
+
+@st.fragment(run_every="15s")
+def render_live_strip(symbol: str, fallback_price: float, fallback_change: float, fallback_time: str):
+    """Refreshes the visible quote independently from the expensive page render."""
+    quote = fetch_live_quote(symbol)
+    live_price, live_change, live_updated = quote[:3] if quote else (
+        fallback_price, fallback_change, fallback_time
+    )
+    st.markdown(
+        f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
+        f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
+        f"<div class='live-time'>{live_change:+.2f}%<br>{escape(str(live_updated))}</div></div>",
+        unsafe_allow_html=True,
+    )
+
 def get_day_trading_signal(df):
     if df.empty:
         return {"action": "VERİ YOK", "class": "indicator-neutral", "price": None, "entry": None, "stop": None, "target": None, "note": "1 dakikalık veri alınamadı."}
@@ -1490,12 +1505,7 @@ elif st.session_state.active_view == "market":
 
             # --- SAĞ TARAF: CANLANDIRILMIŞ BİLGİ ALANI ---
             with col_info:
-                st.markdown(
-                    f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
-                    f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
-                    f"<div class='live-time'>{live_change:+.2f}%<br>{escape(str(live_updated))}</div></div>",
-                    unsafe_allow_html=True,
-                )
+                render_live_strip(symbol, float(live_price), float(live_change), str(live_updated))
                 st.markdown(
                     f"<div class='levels-card'><div class='levels-title'>Destek / direnç</div>"
                     f"<div class='levels-values'><div class='level-value'><span>Destek</span>{support:,.2f}</div>"
