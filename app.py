@@ -36,7 +36,16 @@ st.markdown("""
         background-image: linear-gradient(rgba(119, 198, 176, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(119, 198, 176, 0.035) 1px, transparent 1px);
         background-size: 42px 42px;
     }
-    [data-testid="stMainBlockContainer"] { max-width: 1500px; padding-top: 1.2rem; }
+    header[data-testid="stHeader"] {
+        height: 2rem;
+        background: rgba(10, 18, 20, 0.92);
+        border-bottom: 1px solid rgba(103, 223, 179, 0.1);
+    }
+    header[data-testid="stHeader"] [data-testid="stToolbar"] {
+        visibility: hidden;
+        height: 0;
+    }
+    [data-testid="stMainBlockContainer"] { max-width: 1500px; padding-top: 0.45rem; }
     h1, h2, h3 { color: #ffffff !important; }
     .hero-bar {
         display: flex;
@@ -432,6 +441,7 @@ st.markdown("""
         -webkit-background-clip: text;
         background-clip: text;
         -webkit-text-fill-color: transparent;
+        display: none;
     }
     @media (max-width: 640px) {
         .brand-signature {
@@ -1349,7 +1359,6 @@ else:
     st.markdown("<div class='watch-empty'>Takip listene hızlıca hisse ekle.</div>", unsafe_allow_html=True)
 render_portfolio_panel()
 render_analyst_sidebar(selected_symbols)
-st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
 if st.session_state.active_view == "news":
     render_sidebar_news(selected_symbols)
