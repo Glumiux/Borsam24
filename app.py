@@ -12,6 +12,8 @@ from plotly.subplots import make_subplots
 from google import genai
 import time
 import os
+import requests
+from xml.etree import ElementTree
 
 try:
     from anthropic import Anthropic
@@ -77,10 +79,15 @@ st.markdown("""
         transition: transform 0.2s ease, border-color 0.2s ease;
     }
     .news-card:hover { transform: translateY(-2px); border-color: rgba(101, 217, 255, 0.42); }
+    .news-card { animation: card-enter 0.45s ease both; }
+    .news-card:nth-child(2) { animation-delay: 0.04s; }
+    .news-card:nth-child(3) { animation-delay: 0.08s; }
+    .news-card:nth-child(4) { animation-delay: 0.12s; }
     .news-symbol { color: #65d9ff; font-size: 10px; font-weight: 800; }
     .news-source { float: right; color: #7f8b98; font-size: 9px; }
     .news-title { margin-top: 8px; color: #e7eaee; font-size: 12px; font-weight: 700; line-height: 1.4; }
     .news-time { margin-top: 7px; color: #87919d; font-size: 9px; }
+    .news-summary { margin-top: 8px; color: #b8c2cd; font-size: 11px; line-height: 1.5; }
     .news-feed {
         margin: 0 0 22px;
         border-top: 1px solid rgba(180, 190, 201, 0.14);
@@ -370,6 +377,13 @@ st.markdown("""
         70% { box-shadow: 0 0 0 7px rgba(53, 208, 160, 0); }
         100% { box-shadow: 0 0 0 0 rgba(53, 208, 160, 0); }
     }
+    @keyframes card-enter {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
     [data-testid="stPlotlyChart"] {
         background: rgba(43, 48, 56, 0.72);
         border: 1px solid rgba(180, 190, 201, 0.14);
@@ -520,8 +534,11 @@ BIST30 = {
 }
 
 POPULAR_BIST30 = ["TÜPRAŞ", "ASELSAN", "TÜRK HAVA YOLLARI", "AKBANK", "GARANTİ BBVA", "BİM"]
+BIST100_SYMBOLS = """AEFES AGHOL AKCNS AKFGY AKFYE AKSA AKSEN ALBRK ALFAS ALGYO ALKIM ANHYT ANSGR ARCLK ARDYZ ARSAN AYDEM BAGFS BERA BIENY BIOEN BRSAN BRYAT BSOKE BTCIM CANTE CCOLA CIMSA CLEBI CMENT CWENE DOAS DOHOL ECILC EGEEN EKGYO ENJSA ENKAI EREGL ESCAR ESEN EUPWR FENER FROTO GENIL GLYHO GOLTS GOZDE GWIND GUBRF HATSN HEKTS ISCTR ISDMR IZENR KAREL KARSN KCAER KCHOL KLRHO KONTR KOPOL KORDS KRDMD KUYAS LOGO MAVI MGROS MIATK MPARK NTHOL ODAS OTKAR OYAKC OZKGY PENTA PETKM PGSUS QUAGR RALYH REEDR RYGYO SARKY SASA SDTTR SELEC SISE SMRTG SOKM TATEN TAVHL TCELL TERA TKFEN TMSN TOASO TSKB TTKOM TTRAK TUPRS TURSG ULKER VAKBN VESTL YEOTK YKBNK ZOREN""".split()[:100]
+BIST100_STOCKS = {f"{ticker} · BIST100": f"{ticker}.IS" for ticker in BIST100_SYMBOLS if f"{ticker}.IS" not in BIST30.values()}
+STOCK_UNIVERSE = {**BIST30, **BIST100_STOCKS}
 BIST100_MARKETS = {"BIST 100 Endeksi": "XU100.IS"}
-WATCHLIST_OPTIONS = POPULAR_BIST30 + [name for name in BIST30 if name not in POPULAR_BIST30]
+WATCHLIST_OPTIONS = POPULAR_BIST30 + [name for name in BIST30 if name not in POPULAR_BIST30] + list(BIST100_STOCKS)
 
 # ==========================================
 # 2. MOTORLAR (VERİ & RENKLENDİRİLMİŞ AI)
@@ -897,28 +914,36 @@ def render_fundamental_panel(symbol: str):
 
 @st.cache_data(ttl=180)
 def fetch_followed_news(symbols):
-    """Takip listesinden tekrarsiz, kisa haber akisi getirir."""
+    """Turkce ekonomi RSS kaynaklarini once, Yahoo'yu yedek olarak kullanir."""
     news_items = []
     seen_titles = set()
-    context_symbols = ("XU100.IS", "XU030.IS", "BZ=F", "GC=F", "USDTRY=X")
-    source_symbols = tuple(dict.fromkeys((*symbols, *context_symbols)))
-    for symbol in source_symbols:
+    feeds = {
+        "Bloomberg HT": "https://www.bloomberght.com/rss",
+        "Dünya": "https://www.dunya.com/rss",
+        "Ekonomim": "https://www.ekonomim.com/rss",
+    }
+    for source, feed_url in feeds.items():
         try:
-            ticker = yf.Ticker(symbol)
-            for item in (ticker.news or [])[:5]:
-                title, source, published, url = normalize_news_item(item)
-                normalized_title = str(title).strip()
-                if normalized_title and normalized_title.lower() not in seen_titles:
-                    seen_titles.add(normalized_title.lower())
-                    news_items.append({
-                        "symbol": symbol.replace(".IS", "").replace("=F", "").replace("=X", ""),
-                        "title": normalized_title[:155] + ("..." if len(normalized_title) > 155 else ""),
-                        "source": source or "Yahoo Finance",
-                        "time": published or "Güncel",
-                        "url": url,
-                    })
+            root = ElementTree.fromstring(requests.get(feed_url, timeout=4).content)
+            for item in root.findall(".//item")[:8]:
+                title = (item.findtext("title") or "").strip()
+                url = (item.findtext("link") or "").strip()
+                published = (item.findtext("pubDate") or "Güncel").strip()
+                if title and title.lower() not in seen_titles:
+                    seen_titles.add(title.lower())
+                    news_items.append({"symbol": "PİYASA", "title": title, "source": source, "time": published, "url": url})
         except Exception:
             continue
+    if not news_items:
+        for symbol in tuple(dict.fromkeys((*symbols, "XU100.IS"))):
+            try:
+                for item in (yf.Ticker(symbol).news or [])[:4]:
+                    title, source, published, url = normalize_news_item(item)
+                    if title and title.lower() not in seen_titles:
+                        seen_titles.add(title.lower())
+                        news_items.append({"symbol": symbol.replace(".IS", ""), "title": title, "source": source or "Yahoo Finance", "time": published, "url": url})
+            except Exception:
+                continue
     return news_items[:24]
 
 @st.cache_data(ttl=1800)
@@ -930,9 +955,8 @@ def summarize_news_items(news_items):
     titles = "\n".join(f"{index + 1}. {item['title']}" for index, item in enumerate(news_items))
     prompt = f"""
 ZORUNLU ÇIKTI DİLİ: TÜRKÇE.
-Aşağıdaki İngilizce veya farklı dildeki finans haber başlıklarını Türkçeye çevirip her biri için tek kısa, tarafsız cümlelik özet yaz.
-İngilizce kelime bırakma; şirket ve marka adları özel isim olarak kalabilir.
-Sadece numaralı satırları döndür; yorum, yatırım tavsiyesi veya yeni bilgi ekleme.
+Aşağıdaki haberleri Türkçeye çevir. Her satır için başlığı ve tek kısa, tarafsız özeti üret.
+Çıktı formatı kesinlikle NUMARA|TÜRKÇE BAŞLIK|TÜRKÇE ÖZET olsun. Yatırım tavsiyesi veya yeni bilgi ekleme.
 
 {titles}
 """
@@ -953,11 +977,11 @@ Sadece numaralı satırları döndür; yorum, yatırım tavsiyesi veya yeni bilg
             return [dict(item) for item in news_items]
         summaries = {}
         for line in response_text.splitlines():
-            match = re.match(r"^\s*(\d+)\s*[.)-]\s*(.+)$", line.strip())
+            match = re.match(r"^\s*(\d+)\s*[|.)-]\s*(?:\|\s*)?(.+?)(?:\s*\|\s*(.+))?$", line.strip())
             if match:
-                summaries[int(match.group(1))] = match.group(2).strip()
+                summaries[int(match.group(1))] = (match.group(2).strip(), (match.group(3) or "").strip())
         return [
-            {**dict(item), "title": summaries.get(index + 1, item["title"])}
+            {**dict(item), "title": summaries.get(index + 1, (item["title"], ""))[0], "summary": summaries.get(index + 1, ("", ""))[1]}
             for index, item in enumerate(news_items)
         ]
     except Exception:
@@ -974,6 +998,7 @@ def render_sidebar_news(symbols):
         f"<article class='news-card'><div><span class='news-symbol'>{escape(item['symbol'])}</span>"
         f"<span class='news-source'>{escape(str(item['source']))}</span></div>"
         f"<div class='news-title'>{escape(str(item['title']))}</div>"
+        f"<div class='news-summary'>{escape(str(item.get('summary', '')))}</div>"
         f"<div class='news-time'>{escape(str(item['time']))} "
         f"<a class='news-link' href='{escape(str(item.get('url', '')))}' target='_blank'>Haberi aç ↗</a></div></article>"
         for item in news_items
@@ -1109,7 +1134,11 @@ with refresh_col:
     if st.button("VERİLERİ YENİLE", icon=":material/refresh:", use_container_width=True, help="Grafik, indikatör ve piyasa verilerini güncelle"):
         fetch_stock_data.clear()
         fetch_day_trading_data.clear()
+        fetch_live_quote.clear()
         fetch_market_snapshot.clear()
+        fetch_followed_news.clear()
+        summarize_news_items.clear()
+        auto_ask_ai.clear()
         st.rerun()
 
 toolbar_col, index_col, status_col = st.columns([4, 2.4, 3.6], gap="large")
@@ -1127,7 +1156,7 @@ with index_col:
     selected_index = st.selectbox("BIST100", list(BIST100_MARKETS), label_visibility="collapsed")
 with status_col:
     st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
-selected_symbols = [BIST30[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
+selected_symbols = [STOCK_UNIVERSE[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
 render_analyst_sidebar(selected_symbols)
 st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
@@ -1138,7 +1167,7 @@ if st.session_state.active_view == "trading" and selected_stocks:
     st.markdown('<div class="trade-card"><div class="fundamental-header">Day trading sinyalleri</div><div class="levels-note">1 dakikalık veri · sinyal garanti değildir; risk yönetimi ve emir kararını kullanıcı verir.</div></div>', unsafe_allow_html=True)
     trade_cols = st.columns(min(len(selected_stocks), 3))
     for index, name in enumerate(selected_stocks):
-        trade_df = fetch_day_trading_data(BIST30[name])
+        trade_df = fetch_day_trading_data(STOCK_UNIVERSE[name])
         trade = get_day_trading_signal(trade_df)
         with trade_cols[index % len(trade_cols)]:
             if trade["price"] is None:
@@ -1160,7 +1189,7 @@ if not selected_stocks:
     st.warning("Sol menüden analiz etmek istediğin hisseleri seç.")
 elif st.session_state.active_view == "market":
     for name in selected_stocks:
-        symbol = BIST30[name]
+        symbol = STOCK_UNIVERSE[name]
         try:
             df = fetch_stock_data(symbol, "1Y")
             last = df.iloc[-1]

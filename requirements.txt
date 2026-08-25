@@ -4,4 +4,5 @@ pandas
 ta
 plotly
 google-genai
-anthropic
+anthropic
+requests
