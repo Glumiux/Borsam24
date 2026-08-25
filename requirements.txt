@@ -7,3 +7,4 @@ google-genai
 anthropic
 requests
 git+https://github.com/rongardF/tvdatafeed.git
+streamlit-js-eval

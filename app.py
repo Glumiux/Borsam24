@@ -13,6 +13,7 @@ from google import genai
 import time
 import os
 import requests
+import json
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
@@ -26,6 +27,11 @@ try:
 except ImportError:
     Interval = None
     TvDatafeed = None
+
+try:
+    from streamlit_js_eval import streamlit_js_eval
+except ImportError:
+    streamlit_js_eval = None
 
 # ==========================================
 # 1. TEMA VE SAYFA AYARLARI
@@ -887,8 +893,9 @@ def render_live_strip(symbol: str, fallback_price: float, fallback_change: float
     age_seconds = quote[4] if quote else None
     freshness = f"veri {age_seconds} sn önce" if age_seconds is not None else "veri zamanı bilinmiyor"
     freshness_color = "#ff7c8e" if age_seconds is not None and age_seconds > 180 else "#aeb7c1"
+    live_label = "CANLI BAR · 1 DK" if age_seconds is None or age_seconds <= 180 else "GECİKMELİ VERİ"
     st.markdown(
-        f"<div class='live-strip'><div><div class='live-label'>CANLI BAR · 1 DK</div>"
+        f"<div class='live-strip'><div><div class='live-label'>{live_label}</div>"
         f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
         f"<div class='live-time'>{live_change:+.2f}% günlük<br>{escape(str(live_updated))}<br><span style='color:{freshness_color}'>{freshness}</span></div></div>",
         unsafe_allow_html=True,
@@ -1356,16 +1363,30 @@ def render_market_status():
 
 
 def render_quick_notes():
-    """Keeps private scratch notes in the current browser session only."""
+    """Persists scratch notes in this browser's local storage."""
+    if "quick_notes_loaded" not in st.session_state:
+        saved_notes = streamlit_js_eval(
+            js_expressions="localStorage.getItem('borsam24_notes') || ''",
+            key="load_borsam24_notes",
+        ) if streamlit_js_eval else ""
+        if saved_notes is None:
+            st.stop()
+        st.session_state.quick_notes = saved_notes or ""
+        st.session_state.quick_notes_loaded = True
     with st.container(border=True):
-        st.markdown('<div class="notes-title">Not defterim</div><div class="notes-meta">Bu oturumda tutulur · sunucuya kalıcı kaydedilmez</div>', unsafe_allow_html=True)
-        st.text_area(
+        st.markdown('<div class="notes-title">Not defterim</div><div class="notes-meta">Bu tarayıcıda saklanır · F5 sonrası geri gelir</div>', unsafe_allow_html=True)
+        notes = st.text_area(
             "Notlar",
             placeholder="Takip planı, hedef seviye veya gün içi notunu yaz...",
             height=132,
             key="quick_notes",
             label_visibility="collapsed",
         )
+        if streamlit_js_eval:
+            streamlit_js_eval(
+                js_expressions=f"localStorage.setItem('borsam24_notes', {json.dumps(notes)}); true",
+                key=f"save_borsam24_notes_{hash(notes)}",
+            )
 
 
 @st.fragment(run_every="60s")
@@ -1391,6 +1412,9 @@ def render_automation_view(selected_stocks):
             live_price, session_change, updated, live_last, age_seconds = quote
         else:
             live_price, session_change, updated, live_last, age_seconds = float(last["Close"]), 0.0, "Güncel veri yok", last, None
+        if age_seconds is not None and age_seconds > 180:
+            st.warning(f"{name}: veri {age_seconds} saniyedir güncellenmedi; analiz üretilmedi.")
+            continue
         signal, signal_background = get_master_signal(live_last if quote else last)
         metrics = get_signal_metrics(live_last if quote else last)
         prompt = f"""
