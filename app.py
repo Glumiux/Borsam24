@@ -193,6 +193,17 @@ st.markdown("""
         font-weight: 900;
     }
     .watch-empty { color: #82909d; font-size: 11px; padding: 4px 0 14px; }
+    .notes-panel {
+        padding: 13px 15px 10px;
+        border: 1px solid rgba(103, 223, 179, 0.18);
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(29, 51, 51, 0.78), rgba(25, 34, 41, 0.82));
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+        animation: card-enter 0.45s ease both;
+    }
+    .notes-title { color: #dff8ef; font-size: 12px; font-weight: 900; }
+    .notes-meta { margin-top: 3px; color: #83a29e; font-size: 9px; }
+    .notes-panel textarea { min-height: 118px !important; background: rgba(12, 24, 27, 0.62) !important; }
     .section-kicker {
         margin: 20px 0 8px;
         color: #6f8790;
@@ -1299,6 +1310,19 @@ def render_market_status():
     return f"<div class='market-status' style='color:{color};'><span class='market-status-dot' style='background:{color};box-shadow:0 0 9px {color};'></span>{label} · BIST seansı</div>"
 
 
+def render_quick_notes():
+    """Keeps private scratch notes in the current browser session only."""
+    with st.container(border=True):
+        st.markdown('<div class="notes-title">Not defterim</div><div class="notes-meta">Bu oturumda tutulur · sunucuya kalıcı kaydedilmez</div>', unsafe_allow_html=True)
+        st.text_area(
+            "Notlar",
+            placeholder="Takip planı, hedef seviye veya gün içi notunu yaz...",
+            height=132,
+            key="quick_notes",
+            label_visibility="collapsed",
+        )
+
+
 @st.fragment(run_every="60s")
 def render_automation_view(selected_stocks):
     """Shows a compact recurring review while the automation tab is open."""
@@ -1409,14 +1433,18 @@ with status_col:
     st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
     st.markdown(render_market_status(), unsafe_allow_html=True)
 selected_symbols = [STOCK_UNIVERSE[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
-if selected_stocks:
-    chips = "".join(
-        f"<span class='watch-chip'><span class='watch-avatar'>{escape(watch_avatar(name))}</span>{escape(name.replace(' · BIST100', ''))}</span>"
-        for name in selected_stocks
-    )
-    st.markdown(f"<div class='watchlist-preview'>{chips}</div>", unsafe_allow_html=True)
-else:
-    st.markdown("<div class='watch-empty'>Takip listene hızlıca hisse ekle.</div>", unsafe_allow_html=True)
+watch_col, notes_col = st.columns([1.55, 1], gap="large")
+with watch_col:
+    if selected_stocks:
+        chips = "".join(
+            f"<span class='watch-chip'><span class='watch-avatar'>{escape(watch_avatar(name))}</span>{escape(name.replace(' · BIST100', ''))}</span>"
+            for name in selected_stocks
+        )
+        st.markdown(f"<div class='watchlist-preview'>{chips}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='watch-empty'>Takip listene hızlıca hisse ekle.</div>", unsafe_allow_html=True)
+with notes_col:
+    render_quick_notes()
 render_portfolio_panel()
 render_analyst_sidebar(selected_symbols)
 
