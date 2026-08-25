@@ -388,6 +388,21 @@ st.markdown("""
         box-shadow: 0 10px 28px rgba(0,0,0,0.18);
         backdrop-filter: blur(18px);
     }
+    .live-strip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 0 0 12px;
+        padding: 10px 13px;
+        border: 1px solid rgba(53, 208, 160, 0.26);
+        border-radius: 10px;
+        background: linear-gradient(100deg, rgba(16, 64, 55, 0.7), rgba(25, 42, 53, 0.7));
+    }
+    .live-label { color: #79e6b2; font-size: 10px; font-weight: 900; letter-spacing: 0.08em; }
+    .live-value { color: #ffffff; font-size: 20px; font-weight: 900; }
+    .live-time { color: #aeb7c1; font-size: 10px; text-align: right; }
+    .news-link { color: #65d9ff; font-size: 10px; font-weight: 800; text-decoration: none; }
     .indicator-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -504,6 +519,10 @@ BIST30 = {
     "TÜPRAŞ": "TUPRS.IS", "YAPI KREDİ": "YKBNK.IS"
 }
 
+POPULAR_BIST30 = ["TÜPRAŞ", "ASELSAN", "TÜRK HAVA YOLLARI", "AKBANK", "GARANTİ BBVA", "BİM"]
+BIST100_MARKETS = {"BIST 100 Endeksi": "XU100.IS"}
+WATCHLIST_OPTIONS = POPULAR_BIST30 + [name for name in BIST30 if name not in POPULAR_BIST30]
+
 # ==========================================
 # 2. MOTORLAR (VERİ & RENKLENDİRİLMİŞ AI)
 # ==========================================
@@ -569,6 +588,43 @@ def fetch_day_trading_data(symbol: str):
     df["VWAP"] = (typical_price * df["Volume"]).groupby(session_key).cumsum() / df["Volume"].groupby(session_key).cumsum()
     df["ATR"] = AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14).average_true_range()
     return df.dropna()
+
+@st.cache_data(ttl=15)
+def fetch_live_quote(symbol: str):
+    """Kisa vadeli fiyat karti icin 1 dakikalik son fiyati getirir."""
+    try:
+        df = yf.download(symbol, period="1d", interval="1m", progress=False, auto_adjust=False, prepost=False)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        required = {"Open", "High", "Low", "Close", "Volume"}
+        if df.empty or not required.issubset(df.columns):
+            return None
+        df = df[list(required)].ffill().dropna()
+        df["RSI"] = RSIIndicator(close=df["Close"], window=14).rsi()
+        df["EMA_20"] = EMAIndicator(close=df["Close"], window=20).ema_indicator()
+        df["EMA_50"] = EMAIndicator(close=df["Close"], window=50).ema_indicator()
+        macd = MACD(close=df["Close"], window_slow=26, window_fast=12, window_sign=9)
+        df["MACD"] = macd.macd()
+        df["MACD_Signal"] = macd.macd_signal()
+        bollinger = BollingerBands(close=df["Close"], window=20, window_dev=2)
+        df["BB_High"] = bollinger.bollinger_hband()
+        df["BB_Low"] = bollinger.bollinger_lband()
+        df["Stoch"] = StochasticOscillator(
+            high=df["High"], low=df["Low"], close=df["Close"], window=14, smooth_window=3
+        ).stoch()
+        df["ATR"] = AverageTrueRange(
+            high=df["High"], low=df["Low"], close=df["Close"], window=14
+        ).average_true_range()
+        df["Vol_SMA"] = df["Volume"].rolling(20).mean()
+        df = df.dropna()
+        if len(df) < 2:
+            return None
+        current = float(df["Close"].iloc[-1])
+        previous = float(df["Close"].iloc[-2])
+        change = ((current - previous) / previous) * 100 if previous else 0
+        return current, change, df.index[-1].strftime("%d.%m %H:%M"), df.iloc[-1]
+    except Exception:
+        return None
 
 def get_day_trading_signal(df):
     if df.empty:
@@ -780,7 +836,9 @@ def normalize_news_item(item):
     elif published:
         published = str(published).replace("T", " ")[:16]
     title = content.get("title") or item.get("title")
-    return str(title).strip() if title else "", publisher, published or "Güncel"
+    link_data = content.get("canonicalUrl") or content.get("clickThroughUrl") or item.get("link") or {}
+    url = link_data.get("url") if isinstance(link_data, dict) else link_data
+    return str(title).strip() if title else "", publisher, published or "Güncel", str(url or "")
 
 @st.cache_data(ttl=900)
 def fetch_fundamental_context(symbol: str):
@@ -800,7 +858,7 @@ def fetch_fundamental_context(symbol: str):
         }
         news_lines = []
         for item in (ticker.news or [])[:6]:
-            title, publisher, _ = normalize_news_item(item)
+            title, publisher, _, _ = normalize_news_item(item)
             if title:
                 news_lines.append(f"- {title} ({publisher or 'kaynak belirtilmemiş'})")
         return financials, news_lines
@@ -848,7 +906,7 @@ def fetch_followed_news(symbols):
         try:
             ticker = yf.Ticker(symbol)
             for item in (ticker.news or [])[:5]:
-                title, source, published = normalize_news_item(item)
+                title, source, published, url = normalize_news_item(item)
                 normalized_title = str(title).strip()
                 if normalized_title and normalized_title.lower() not in seen_titles:
                     seen_titles.add(normalized_title.lower())
@@ -857,6 +915,7 @@ def fetch_followed_news(symbols):
                         "title": normalized_title[:155] + ("..." if len(normalized_title) > 155 else ""),
                         "source": source or "Yahoo Finance",
                         "time": published or "Güncel",
+                        "url": url,
                     })
         except Exception:
             continue
@@ -878,12 +937,22 @@ Sadece numaralı satırları döndür; yorum, yatırım tavsiyesi veya yeni bilg
 {titles}
 """
     try:
-        response = genai.Client(api_key=API_KEY).models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt,
-        )
+        if CLAUDE_API_KEY and Anthropic is not None:
+            response = Anthropic(api_key=CLAUDE_API_KEY).messages.create(
+                model="claude-3-5-haiku-latest",
+                max_tokens=700,
+                system="Haber başlıklarını Türkçe, tarafsız ve kısa özetleyen finans editörüsün.",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            response_text = "".join(block.text for block in response.content if hasattr(block, "text"))
+        elif API_KEY:
+            response_text = genai.Client(api_key=API_KEY).models.generate_content(
+                model="gemini-1.5-flash", contents=prompt
+            ).text or ""
+        else:
+            return [dict(item) for item in news_items]
         summaries = {}
-        for line in (response.text or "").splitlines():
+        for line in response_text.splitlines():
             match = re.match(r"^\s*(\d+)\s*[.)-]\s*(.+)$", line.strip())
             if match:
                 summaries[int(match.group(1))] = match.group(2).strip()
@@ -905,7 +974,8 @@ def render_sidebar_news(symbols):
         f"<article class='news-card'><div><span class='news-symbol'>{escape(item['symbol'])}</span>"
         f"<span class='news-source'>{escape(str(item['source']))}</span></div>"
         f"<div class='news-title'>{escape(str(item['title']))}</div>"
-        f"<div class='news-time'>{escape(str(item['time']))}</div></article>"
+        f"<div class='news-time'>{escape(str(item['time']))} "
+        f"<a class='news-link' href='{escape(str(item.get('url', '')))}' target='_blank'>Haberi aç ↗</a></div></article>"
         for item in news_items
     )
     st.markdown(f"<div class='news-grid'>{items}</div>", unsafe_allow_html=True)
@@ -1042,19 +1112,22 @@ with refresh_col:
         fetch_market_snapshot.clear()
         st.rerun()
 
-toolbar_col, status_col = st.columns([4, 6], gap="large")
+toolbar_col, index_col, status_col = st.columns([4, 2.4, 3.6], gap="large")
 with toolbar_col:
-    st.markdown('<div class="topbar-label">TAKİP LİSTESİ</div>', unsafe_allow_html=True)
+    st.markdown('<div class="topbar-label">TAKİP LİSTESİ · POPÜLER BIST30 ÜSTTE</div>', unsafe_allow_html=True)
     selected_stocks = st.multiselect(
         "Takip hisseleri",
-        list(BIST30.keys()),
+        WATCHLIST_OPTIONS,
         default=["TÜPRAŞ", "ASELSAN"],
         placeholder="Hisse ara ve takip listene ekle",
         label_visibility="collapsed",
     )
+with index_col:
+    st.markdown('<div class="topbar-label">ENDEKSLER</div>', unsafe_allow_html=True)
+    selected_index = st.selectbox("BIST100", list(BIST100_MARKETS), label_visibility="collapsed")
 with status_col:
-    st.markdown('<div class="topbar-label">PİYASA 60 sn · TEKNİK VERİ 900 sn · TEMEL VERİ 900 sn</div>', unsafe_allow_html=True)
-selected_symbols = [BIST30[name] for name in selected_stocks]
+    st.markdown('<div class="topbar-label">CANLI FİYAT 15 sn · TRADE 20 sn · HABER 180 sn · TEMEL 900 sn</div>', unsafe_allow_html=True)
+selected_symbols = [BIST30[name] for name in selected_stocks] + [BIST100_MARKETS[selected_index]]
 render_analyst_sidebar(selected_symbols)
 st.markdown('<div class="brand-signature">ByFurkan</div>', unsafe_allow_html=True)
 
@@ -1094,6 +1167,25 @@ elif st.session_state.active_view == "market":
             prev = df.iloc[-2]
             pct_change = ((last['Close'] - prev['Close']) / prev['Close']) * 100
             support, resistance = get_support_resistance(df)
+            live_quote = fetch_live_quote(symbol)
+            live_price, live_change, live_updated, indicator_last = live_quote or (
+                float(last['Close']), float(pct_change), df.index[-1].strftime("%d.%m %H:%M"), last
+            )
+            fundamental_context = format_fundamental_context(symbol)
+            prompt_data = f"""
+            Sen temkinli bir finans analistisin. {name} ({symbol}) için güncel teknik veriyi Türkçe ve kısa yorumla.
+            Yatırım tavsiyesi verme; veri eksikse bunu söyle, rakam uydurma.
+            En fazla 4 kısa madde kullan: Yön, Momentum, Risk, İzlenecek seviye.
+            1 dakikalık son fiyat: {live_price:.2f} TL, değişim: %{live_change:+.2f}
+            1 dakikalık teknik veri: RSI: {indicator_last['RSI']:.1f}, EMA20: {indicator_last['EMA_20']:.2f}, EMA50: {indicator_last['EMA_50']:.2f}
+            Destek: {support:.2f}, direnç: {resistance:.2f}
+
+            {fundamental_context}
+            """
+            ai_response = auto_ask_ai(
+                name, symbol, live_price, float(indicator_last['RSI']), float(indicator_last['Volume']),
+                float(indicator_last['Vol_SMA']), live_change, prompt_data,
+            )
 
             st.markdown(f"### {name} &nbsp; <span style='font-size:1.1rem; color:{'#10b981' if pct_change>=0 else '#ef4444'};'>({pct_change:+.2f}%)</span>", unsafe_allow_html=True)
 
@@ -1183,9 +1275,22 @@ elif st.session_state.active_view == "market":
                     'displayModeBar': True,
                     'responsive': True,
                 })
+                st.markdown(f"""
+                <div class='ai-card'>
+                    <div style='color:#65d9ff; font-weight:900; margin-bottom:8px; font-size:14px;'>CLAUDE · Kısa vadeli okuma</div>
+                    <div style='font-size:13px; color:#cbd5e1; line-height:1.6;'>{ai_response}</div>
+                    <div class='live-time'>1 dakikalık veri · {escape(str(live_updated))} · Tahmin kesinlik garantisi değildir.</div>
+                </div>
+                """, unsafe_allow_html=True)
 
             # --- SAĞ TARAF: CANLANDIRILMIŞ BİLGİ ALANI ---
             with col_info:
+                st.markdown(
+                    f"<div class='live-strip'><div><div class='live-label'>CANLI FİYAT · 1 DK</div>"
+                    f"<div class='live-value'>{live_price:,.2f} TL</div></div>"
+                    f"<div class='live-time'>{live_change:+.2f}%<br>{escape(str(live_updated))}</div></div>",
+                    unsafe_allow_html=True,
+                )
                 st.markdown(
                     f"<div class='levels-card'><div class='levels-title'>Destek / direnç</div>"
                     f"<div class='levels-values'><div class='level-value'><span>Destek</span>{support:,.2f}</div>"
@@ -1194,7 +1299,7 @@ elif st.session_state.active_view == "market":
                     unsafe_allow_html=True,
                 )
                 # Fiyat ve Yanındaki Yeni AL/SAT Rozeti
-                master_text, master_bg = get_master_signal(last)
+                master_text, master_bg = get_master_signal(indicator_last)
                 st.markdown(f"""
                 <div style="display: flex; align-items: center; margin-bottom: 15px;">
                     <div class='price-tag' style="margin-bottom: 0;">{last['Close']:,.2f} TL</div>
@@ -1202,11 +1307,11 @@ elif st.session_state.active_view == "market":
                 </div>
                 """, unsafe_allow_html=True)
                 st.markdown(
-                    f'<div class="signal-summary"><strong>Ne oluyor?</strong> {get_signal_summary(last)}</div>',
+                    f'<div class="signal-summary"><strong>Ne oluyor?</strong> {get_signal_summary(indicator_last)}</div>',
                     unsafe_allow_html=True,
                 )
-                ema20_value = last['EMA_20']
-                ema50_value = last['EMA_50']
+                ema20_value = indicator_last['EMA_20']
+                ema50_value = indicator_last['EMA_50']
                 ema_spread = ((ema20_value - ema50_value) / ema50_value) * 100 if ema50_value else 0
                 price_vs_ema = ((last['Close'] - ema20_value) / ema20_value) * 100 if ema20_value else 0
                 ema_direction = "Yukarı yön teyitli" if ema20_value > ema50_value else "Aşağı yön baskın"
@@ -1229,7 +1334,7 @@ elif st.session_state.active_view == "market":
                 </div>
                 """, unsafe_allow_html=True)
 
-                indicator_readouts = get_indicator_readouts(last)
+                indicator_readouts = get_indicator_readouts(indicator_last)
                 indicator_cards = "".join(
                     f"<div class='indicator-box'><div class='indicator-label'>{label}</div>"
                     f"<div class='indicator-value {result_class}'>{result}</div>"
@@ -1243,35 +1348,6 @@ elif st.session_state.active_view == "market":
                 """, unsafe_allow_html=True)
 
                 render_fundamental_panel(symbol)
-
-                # 1. AI Yorum Kartı
-                fundamental_context = format_fundamental_context(symbol)
-                prompt_data = f"""
-                Sen temkinli bir finans analistisin. {name} ({symbol}) için sadece güncel haber,
-                bilanço ve genel piyasa etkisini Türkçe, kısa ve anlaşılır biçimde özetle.
-                Yatırım tavsiyesi verme; veri eksikse bunu söyle, rakam veya haber uydurma.
-                En fazla 4 kısa madde kullan: Bilanço, Haberler, Piyasa etkisi, Dikkat edilmesi gereken.
-                Günlük fiyat değişimi: %{pct_change:+.2f}
-
-                {fundamental_context}
-                """
-                ai_response = auto_ask_ai(
-                    name,
-                    symbol,
-                    float(last['Close']),
-                    float(last['RSI']),
-                    float(last['Volume']),
-                    float(last['Vol_SMA']),
-                    float(pct_change),
-                    prompt_data,
-                )
-
-                st.markdown(f"""
-                <div class='ai-card'>
-                    <div style='color:#00E5FF; font-weight:bold; margin-bottom:8px; font-size:15px;'>📰 Güncel Haber & Bilanço:</div>
-                    <div style='font-size:14px; color:#cbd5e1; line-height:1.6;'>{ai_response}</div>
-                </div>
-                """, unsafe_allow_html=True)
 
             st.write("---")
 
